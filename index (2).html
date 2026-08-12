@@ -1,0 +1,1023 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Mini TOS · Термінал</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Condensed:wght@600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root{
+    --ink:#1B2430;
+    --muted:#5B6670;
+    --steel:#3E5C74;
+    --steel-deep:#24333F;
+    --yard:#EDF0EE;
+    --surface:#FFFFFF;
+    --line:#D9DFDC;
+    --amber:#E2A63B;
+    --amber-deep:#A6741F;
+    --go:#2F7D52;
+    --go-deep:#235F3F;
+    --stop:#A93B26;
+    --stop-deep:#8A2F1E;
+    --radius:6px;
+    --shadow-sm:0 1px 2px rgba(27,36,48,.06), 0 1px 1px rgba(27,36,48,.04);
+    --shadow-md:0 6px 20px rgba(27,36,48,.12);
+    --font-display:'IBM Plex Sans Condensed','Arial Narrow',sans-serif;
+    --font-body:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
+    --font-mono:'IBM Plex Mono','SF Mono',Consolas,monospace;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; }
+  body{
+    background:var(--yard);
+    color:var(--ink);
+    font-family:var(--font-body);
+    font-size:15px;
+    line-height:1.5;
+    min-height:100vh;
+  }
+  .hidden{ display:none !important; }
+  button{ font:inherit; }
+
+  /* ---------- Setup banner ---------- */
+  .setup-banner{
+    background:var(--amber); color:var(--steel-deep); padding:12px 20px; text-align:center;
+    font-size:13.5px; font-weight:500;
+  }
+  .setup-banner code{ background:rgba(0,0,0,.1); padding:1px 6px; border-radius:4px; }
+
+  /* ---------- Top bar ---------- */
+  .topbar{
+    background:var(--steel-deep); color:#fff; position:sticky; top:0; z-index:20;
+    box-shadow:var(--shadow-sm);
+  }
+  .topbar-inner{
+    max-width:1080px; margin:0 auto; padding:12px 20px;
+    display:flex; align-items:center; gap:20px; flex-wrap:wrap;
+  }
+  .wordmark{ font-family:var(--font-display); font-weight:700; letter-spacing:.08em; font-size:18px; }
+  .wordmark span{ color:var(--amber); }
+  .topnav{ display:flex; gap:4px; margin-left:auto; }
+  .topnav button{
+    background:transparent; border:none; color:rgba(255,255,255,.75);
+    font-family:var(--font-body); font-weight:500; font-size:14px;
+    padding:8px 14px; border-radius:var(--radius); cursor:pointer;
+    transition:background .15s,color .15s;
+  }
+  .topnav button:hover,.topnav button.active{ background:rgba(255,255,255,.12); color:#fff; }
+  .user-badge{
+    display:flex; align-items:center; gap:10px; font-size:13px; color:rgba(255,255,255,.85);
+    border-left:1px solid rgba(255,255,255,.18); padding-left:16px;
+  }
+  #user-badge-name{ font-weight:600; }
+  #switch-user-btn{
+    background:transparent; border:1px solid rgba(255,255,255,.32); color:rgba(255,255,255,.85);
+    font-size:12px; padding:4px 10px; border-radius:999px; cursor:pointer;
+  }
+  #switch-user-btn:hover{ background:rgba(255,255,255,.12); }
+
+  main#app{ max-width:1080px; margin:0 auto; padding:28px 20px 64px; }
+
+  .screen-title{
+    font-family:var(--font-display); font-weight:700; font-size:26px; letter-spacing:.01em;
+    margin:0 0 20px;
+  }
+  .back-btn{
+    background:none; border:none; color:var(--steel); font-family:var(--font-body);
+    font-weight:500; font-size:14px; cursor:pointer; padding:0; margin-bottom:14px;
+  }
+  .back-btn:hover{ text-decoration:underline; }
+
+  /* ---------- Login ---------- */
+  #screen-login{ display:flex; align-items:center; justify-content:center; min-height:78vh; }
+  .login-card{
+    background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+    box-shadow:var(--shadow-md); padding:36px 32px; width:100%; max-width:380px; text-align:center;
+  }
+  .login-mark{ font-family:var(--font-display); font-weight:700; font-size:24px; letter-spacing:.08em; color:var(--steel-deep); }
+  .login-mark span{ color:var(--amber-deep); }
+  .login-sub{ color:var(--muted); font-size:13px; margin:4px 0 24px; }
+  .field-label{
+    display:block; text-align:left; font-size:12px; font-weight:600; text-transform:uppercase;
+    letter-spacing:.06em; color:var(--muted); margin-bottom:6px;
+  }
+  select,input[type=text],input[type=date]{
+    width:100%; font-family:var(--font-body); font-size:15px; padding:10px 12px;
+    border:1px solid var(--line); border-radius:var(--radius); background:var(--surface);
+    color:var(--ink); margin-bottom:16px;
+  }
+  select:focus,input:focus{ outline:2px solid var(--amber); outline-offset:1px; border-color:var(--amber-deep); }
+
+  .btn{
+    font-family:var(--font-body); font-weight:600; font-size:15px; padding:11px 20px;
+    border-radius:var(--radius); border:1px solid transparent; cursor:pointer;
+    transition:transform .1s ease,box-shadow .15s ease,background .15s ease;
+  }
+  .btn:hover:not(:disabled){ transform:translateY(-1px); box-shadow:var(--shadow-sm); }
+  .btn:active:not(:disabled){ transform:translateY(0); }
+  .btn:disabled{ opacity:.5; cursor:not-allowed; }
+  .btn-block{ width:100%; display:block; }
+  .btn-primary{ background:var(--steel); color:#fff; }
+  .btn-primary:hover:not(:disabled){ background:var(--steel-deep); }
+  .btn-go{ background:var(--go); color:#fff; }
+  .btn-go:hover:not(:disabled){ background:var(--go-deep); }
+  .btn-stop{ background:var(--stop); color:#fff; }
+  .btn-stop:hover:not(:disabled){ background:var(--stop-deep); }
+  .btn-ghost{ background:transparent; border-color:var(--line); color:var(--ink); }
+  .btn-ghost:hover:not(:disabled){ background:rgba(0,0,0,.04); }
+  .btn-link{
+    background:none; border:none; color:var(--steel); font-size:13px; cursor:pointer;
+    text-decoration:underline; padding:4px 0;
+  }
+
+  /* ---------- Menu tiles ---------- */
+  .menu-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
+  @media (max-width:720px){ .menu-grid{ grid-template-columns:1fr; } }
+  .menu-tile{
+    background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+    padding:32px 20px; display:flex; flex-direction:column; align-items:center; gap:14px;
+    cursor:pointer; box-shadow:var(--shadow-sm); color:var(--ink);
+    transition:transform .12s ease,box-shadow .15s ease,border-color .15s ease;
+  }
+  .menu-tile:hover{ transform:translateY(-2px); box-shadow:var(--shadow-md); border-color:var(--steel); }
+  .menu-tile-icon{ width:46px; height:46px; color:var(--steel); }
+  .menu-tile--in .menu-tile-icon{ color:var(--go); }
+  .menu-tile--out .menu-tile-icon{ color:var(--amber-deep); }
+  .menu-tile-label{ font-family:var(--font-display); font-weight:700; font-size:19px; letter-spacing:.02em; }
+
+  /* ---------- Signature: container plate + check-digit lock ---------- */
+  .plate-card{ background:var(--steel-deep); border-radius:var(--radius); padding:24px; margin-bottom:20px; }
+  .plate-card .field-label{ color:rgba(255,255,255,.65); }
+  .plate-row{ display:flex; gap:12px; align-items:stretch; }
+  .plate-input{
+    flex:1; font-family:var(--font-mono); font-weight:600; font-size:22px; letter-spacing:.3em;
+    text-transform:uppercase; text-align:center; padding:14px 16px; margin-bottom:0;
+    border:2px solid rgba(255,255,255,.16); border-radius:var(--radius);
+    background-image:repeating-linear-gradient(to right, rgba(255,255,255,.07) 0, rgba(255,255,255,.07) 1px, transparent 1px, transparent calc(100% / 11));
+    background-color:#16202A; color:#EAF0EE;
+  }
+  .plate-input::placeholder{ color:rgba(234,240,238,.32); letter-spacing:.16em; }
+  .plate-input:focus{ outline:2px solid var(--amber); border-color:var(--amber); }
+  .lock-badge{
+    width:56px; flex-shrink:0; display:flex; align-items:center; justify-content:center;
+    font-family:var(--font-mono); font-weight:700; font-size:19px; border-radius:var(--radius);
+    border:2px solid rgba(255,255,255,.16); color:rgba(255,255,255,.55);
+    transition:background .2s ease,border-color .2s ease,color .2s ease,transform .2s ease;
+  }
+  .lock-badge--invalid{ background:var(--stop); border-color:var(--stop); color:#fff; }
+  .lock-badge--valid{ background:var(--go); border-color:var(--go); color:#fff; animation:lock-pop .3s ease; }
+  @keyframes lock-pop{ 0%{ transform:scale(.85); } 60%{ transform:scale(1.08); } 100%{ transform:scale(1); } }
+  .plate-hint{ color:rgba(255,255,255,.55); font-size:12.5px; margin:10px 0 0; }
+  .plate-hint.is-error{ color:#F3A08E; }
+  .plate-hint.is-ok{ color:#9FDBB6; }
+
+  /* ---------- Forms ---------- */
+  .form-card{ background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); padding:24px; box-shadow:var(--shadow-sm); }
+  .form-grid{ display:grid; grid-template-columns:repeat(2,1fr); gap:16px 20px; margin-bottom:20px; align-items:end; }
+  @media (max-width:560px){ .form-grid{ grid-template-columns:1fr; } }
+  .field select,.field input{ margin-bottom:0; }
+  .checkbox-field{ display:flex; align-items:center; gap:8px; font-size:13.5px; color:var(--muted); grid-column:1 / -1; }
+  .checkbox-field input{ width:auto; margin:0; }
+
+  /* ---------- Tables ---------- */
+  .search-input{ max-width:320px; margin-bottom:16px; }
+  .stock-toolbar{ display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  .stock-summary{ color:var(--muted); font-size:13.5px; margin:-6px 0 16px; }
+  .table-wrap{ background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); overflow:hidden; overflow-x:auto; }
+  .data-table{ width:100%; border-collapse:collapse; font-size:14px; }
+  .data-table th{
+    text-align:left; font-family:var(--font-body); font-weight:600; text-transform:uppercase;
+    letter-spacing:.04em; font-size:11.5px; color:var(--muted); padding:12px 14px;
+    border-bottom:1px solid var(--line); white-space:nowrap;
+  }
+  .data-table td{ padding:11px 14px; border-bottom:1px solid var(--line); vertical-align:middle; }
+  .data-table tbody tr:last-child td{ border-bottom:none; }
+  .data-table tbody tr:hover{ background:rgba(62,92,116,.05); }
+  .mono-cell{ font-family:var(--font-mono); font-weight:600; letter-spacing:.03em; white-space:nowrap; }
+  .empty-note{ padding:28px; text-align:center; color:var(--muted); font-size:14px; }
+
+  .badge{
+    display:inline-block; padding:3px 9px; border-radius:999px; font-size:11.5px; font-weight:600;
+    text-transform:uppercase; letter-spacing:.03em; color:#fff; white-space:nowrap;
+  }
+  .badge--empty{ background:var(--muted); }
+  .badge--export{ background:var(--amber-deep); }
+  .badge--import{ background:var(--go); }
+
+  .row-menu-wrap{ position:relative; text-align:right; }
+  .row-menu-btn{
+    background:none; border:none; cursor:pointer; font-size:18px; color:var(--muted);
+    padding:4px 8px; border-radius:var(--radius); line-height:1;
+  }
+  .row-menu-btn:hover{ background:rgba(0,0,0,.06); }
+  .row-menu{
+    position:absolute; right:0; top:100%; margin-top:4px; background:var(--surface);
+    border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow-md);
+    z-index:10; min-width:170px; overflow:hidden;
+  }
+  .row-menu button{
+    display:block; width:100%; text-align:left; background:none; border:none;
+    padding:10px 14px; font-size:13.5px; font-family:var(--font-body); cursor:pointer; color:var(--ink);
+  }
+  .row-menu button:hover{ background:var(--yard); }
+
+  /* ---------- Modal ---------- */
+  .modal-backdrop{
+    position:fixed; inset:0; background:rgba(27,36,48,.5); display:flex; align-items:center;
+    justify-content:center; z-index:100; padding:20px;
+  }
+  .modal-card{ background:var(--surface); border-radius:var(--radius); box-shadow:var(--shadow-md); width:100%; max-width:420px; padding:24px; }
+  .modal-title{ font-family:var(--font-display); font-weight:700; font-size:19px; margin:0 0 16px; }
+  .modal-plate{ display:flex; align-items:center; gap:10px; margin-bottom:14px; flex-wrap:wrap; }
+  .modal-plate-number{ font-family:var(--font-mono); font-weight:700; font-size:17px; letter-spacing:.08em; }
+  .modal-meta{ display:grid; grid-template-columns:auto 1fr; gap:5px 12px; font-size:13.5px; margin:0 0 18px; }
+  .modal-meta dt{ color:var(--muted); }
+  .modal-meta dd{ margin:0; font-weight:500; }
+  .modal-actions{ display:flex; gap:10px; justify-content:flex-end; margin-top:20px; }
+
+  /* ---------- Toasts ---------- */
+  #toast-root{ position:fixed; top:16px; right:16px; z-index:200; display:flex; flex-direction:column; gap:8px; max-width:calc(100vw - 32px); }
+  .toast{
+    background:var(--ink); color:#fff; padding:12px 16px; border-radius:var(--radius);
+    font-size:13.5px; box-shadow:var(--shadow-md); max-width:320px; animation:toast-in .2s ease;
+  }
+  .toast--success{ background:var(--go-deep); }
+  .toast--error{ background:var(--stop-deep); }
+  @keyframes toast-in{ from{ opacity:0; transform:translateY(-6px); } to{ opacity:1; transform:none; } }
+
+  /* ---------- Loading overlay ---------- */
+  .loading-overlay{ position:fixed; inset:0; background:rgba(237,240,238,.6); display:flex; align-items:center; justify-content:center; z-index:300; }
+  .spinner{ width:36px; height:36px; border-radius:50%; border:4px solid var(--line); border-top-color:var(--steel); animation:spin .7s linear infinite; }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+
+  .form-error{ color:var(--stop-deep); font-size:13px; margin:8px 0 0; }
+  :focus-visible{ outline:2px solid var(--amber); outline-offset:2px; }
+
+  @media (prefers-reduced-motion:reduce){
+    *,*::before,*::after{
+      animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important;
+    }
+    .spinner{ animation:none; border-top-color:var(--line); }
+  }
+</style>
+</head>
+<body>
+
+  <div id="setup-banner" class="setup-banner hidden">
+    Застосунок ще не підключено: вкажіть URL Apps Script у змінній <code>API_URL</code> (на початку файлу index.html). Кроки — у README.md.
+  </div>
+
+  <header class="topbar hidden" id="topbar">
+    <div class="topbar-inner">
+      <div class="wordmark">MINI <span>TOS</span></div>
+      <nav class="topnav">
+        <button data-nav="menu">Головна</button>
+        <button data-nav="reports">Звіти</button>
+      </nav>
+      <div class="user-badge" id="user-badge">
+        <span id="user-badge-name"></span>
+        <button id="switch-user-btn" title="Змінити користувача">змінити</button>
+      </div>
+    </div>
+  </header>
+
+  <main id="app">
+
+    <!-- ЛОГІН -->
+    <section id="screen-login" class="screen">
+      <div class="login-card">
+        <div class="login-mark">MINI <span>TOS</span></div>
+        <p class="login-sub">Термінал · облік контейнерів</p>
+        <label class="field-label" for="login-select">Хто ви?</label>
+        <select id="login-select"></select>
+        <button id="login-continue" class="btn btn-primary btn-block">Продовжити</button>
+        <button id="login-new-toggle" class="btn-link">+ Додати нове ім'я</button>
+        <div id="login-new-block" class="hidden" style="margin-top:14px; text-align:left;">
+          <label class="field-label" for="login-new-name">Ім'я та прізвище</label>
+          <input id="login-new-name" type="text" placeholder="напр. Олена Ковальчук" maxlength="60" />
+          <button id="login-new-submit" class="btn btn-primary btn-block">Додати і продовжити</button>
+        </div>
+        <p id="login-error" class="form-error hidden"></p>
+      </div>
+    </section>
+
+    <!-- МЕНЮ -->
+    <section id="screen-menu" class="screen hidden">
+      <h1 class="screen-title">Головне меню</h1>
+      <div class="menu-grid">
+        <button class="menu-tile menu-tile--in" data-nav="arrival">
+          <svg class="menu-tile-icon" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M24 6V30M24 30L14 20M24 30L34 20" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+            <rect x="8" y="36" width="32" height="6" rx="1.5" fill="currentColor"/>
+          </svg>
+          <span class="menu-tile-label">Прихід</span>
+        </button>
+        <button class="menu-tile menu-tile--out" data-nav="departure">
+          <svg class="menu-tile-icon" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M24 32V8M24 8L14 18M24 8L34 18" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+            <rect x="8" y="36" width="32" height="6" rx="1.5" fill="currentColor"/>
+          </svg>
+          <span class="menu-tile-label">Розхід</span>
+        </button>
+        <button class="menu-tile menu-tile--stock" data-nav="stock">
+          <svg class="menu-tile-icon" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="6" y="8" width="36" height="9" rx="1.5" stroke="currentColor" stroke-width="2.5"/>
+            <rect x="6" y="20" width="36" height="9" rx="1.5" stroke="currentColor" stroke-width="2.5"/>
+            <rect x="6" y="32" width="36" height="9" rx="1.5" stroke="currentColor" stroke-width="2.5"/>
+          </svg>
+          <span class="menu-tile-label">Залишки на терміналі</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- ПРИХІД -->
+    <section id="screen-arrival" class="screen hidden">
+      <button class="back-btn" data-nav="menu">← Меню</button>
+      <h1 class="screen-title">Прихід контейнера</h1>
+
+      <div class="plate-card">
+        <label class="field-label" for="arrival-number">Номер контейнера</label>
+        <div class="plate-row">
+          <input id="arrival-number" class="plate-input" type="text" inputmode="text" autocomplete="off" spellcheck="false" placeholder="MSCU1234567" maxlength="11" />
+          <div id="lock-badge" class="lock-badge"><span id="lock-badge-content">–</span></div>
+        </div>
+        <p id="plate-hint" class="plate-hint">Введіть 4 літери коду власника + 7 цифр серійного номера</p>
+      </div>
+
+      <form id="arrival-form" class="form-card">
+        <div class="form-grid">
+          <div class="field">
+            <label class="field-label" for="arrival-status">Статус *</label>
+            <select id="arrival-status" required>
+              <option value="" disabled selected>Оберіть статус</option>
+              <option value="Empty">Empty</option>
+              <option value="Export">Export</option>
+              <option value="Import">Import</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="field-label" for="arrival-type">Тип *</label>
+            <select id="arrival-type" required>
+              <option value="" disabled selected>Оберіть тип</option>
+              <option value="20'">20'</option>
+              <option value="40'">40'</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="field-label" for="arrival-location">Локація *</label>
+            <select id="arrival-location" required>
+              <option value="" disabled selected>Оберіть локацію</option>
+              <option value="майданчик">майданчик</option>
+              <option value="МС">МС</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="field-label" for="arrival-line">Лінія</label>
+            <select id="arrival-line">
+              <option value="">не вказано</option>
+              <option>Cosco</option>
+              <option>Evergreen</option>
+              <option>CMA</option>
+              <option>ONE</option>
+              <option>Maersk</option>
+              <option>Hapag</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="field-label" for="arrival-date">Дата приходу *</label>
+            <input id="arrival-date" type="date" required />
+          </div>
+        </div>
+        <button id="arrival-submit" type="submit" class="btn btn-go btn-block" disabled>Зберегти прихід</button>
+      </form>
+    </section>
+
+    <!-- РОЗХІД -->
+    <section id="screen-departure" class="screen hidden">
+      <button class="back-btn" data-nav="menu">← Меню</button>
+      <h1 class="screen-title">Розхід контейнера</h1>
+      <input id="departure-search" class="search-input" type="text" placeholder="Пошук за номером…" />
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr><th>Номер</th><th>Статус</th><th>Тип</th><th>Локація</th><th>Лінія</th><th>Прихід</th><th>Днів</th><th></th></tr>
+          </thead>
+          <tbody id="departure-tbody"></tbody>
+        </table>
+        <p id="departure-empty" class="empty-note hidden">Немає контейнерів на терміналі.</p>
+      </div>
+    </section>
+
+    <!-- ЗАЛИШКИ -->
+    <section id="screen-stock" class="screen hidden">
+      <button class="back-btn" data-nav="menu">← Меню</button>
+      <h1 class="screen-title">Залишки на терміналі</h1>
+      <div class="stock-toolbar">
+        <input id="stock-search" class="search-input" type="text" placeholder="Пошук за номером…" />
+        <button id="stock-refresh" class="btn btn-ghost">Оновити</button>
+      </div>
+      <p class="stock-summary" id="stock-summary"></p>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr><th>Номер</th><th>Статус</th><th>Тип</th><th>Локація</th><th>Лінія</th><th>Прихід</th><th>Днів</th><th>Хто поставив</th></tr>
+          </thead>
+          <tbody id="stock-tbody"></tbody>
+        </table>
+        <p id="stock-empty" class="empty-note hidden">На терміналі порожньо.</p>
+      </div>
+    </section>
+
+    <!-- ЗВІТИ -->
+    <section id="screen-reports" class="screen hidden">
+      <button class="back-btn" data-nav="menu">← Меню</button>
+      <h1 class="screen-title">Звіти</h1>
+      <div class="form-card" style="margin-bottom:20px;">
+        <div class="form-grid">
+          <div class="field">
+            <label class="field-label" for="report-from">З дати</label>
+            <input id="report-from" type="date" />
+          </div>
+          <div class="field">
+            <label class="field-label" for="report-to">По дату</label>
+            <input id="report-to" type="date" />
+          </div>
+          <label class="checkbox-field">
+            <input id="report-include-open" type="checkbox" />
+            Включити контейнери, що ще на терміналі
+          </label>
+        </div>
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+          <button id="report-generate" class="btn btn-primary">Сформувати</button>
+          <button id="report-export" class="btn btn-ghost" disabled>Зберегти в Excel</button>
+        </div>
+      </div>
+      <p class="stock-summary" id="report-summary"></p>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead><tr><th>Номер</th><th>Прихід</th><th>Розхід</th><th>Днів зберігання</th></tr></thead>
+          <tbody id="report-tbody"></tbody>
+        </table>
+        <p id="report-empty" class="empty-note hidden">Немає даних за обраний період.</p>
+      </div>
+    </section>
+
+  </main>
+
+  <div id="modal-root"></div>
+  <div id="toast-root" aria-live="polite"></div>
+  <div id="loading-overlay" class="loading-overlay hidden"><div class="spinner"></div></div>
+
+<script>
+  // ==========================================================================
+  // НАЛАШТУВАННЯ — вставте URL вашого Apps Script Web App (закінчується на /exec)
+  // ==========================================================================
+  const API_URL = "ВСТАВТЕ_СЮДИ_URL_ВАШОГО_APPS_SCRIPT_ПІСЛЯ_ДЕПЛОЮ";
+
+  // Приклад для власного хостингу (поза Claude.ai), щоб застосунок пам'ятав
+  // обраного користувача між сесіями — просто розкоментуйте ці 2 місця:
+  // 1) тут:    const savedUser = localStorage.getItem('tos_user');
+  // 2) у loginAs(name): localStorage.setItem('tos_user', name);
+
+  // ==========================================================================
+  // Дати
+  // ==========================================================================
+  function todayStr(){
+    const d = new Date();
+    const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+    return local.toISOString().slice(0, 10);
+  }
+  function parseLocalDate(s){ return s ? new Date(s + 'T00:00:00') : null; }
+  function daysInclusive(fromStr, toStr){
+    const a = parseLocalDate(fromStr), b = parseLocalDate(toStr);
+    if (!a || !b) return null;
+    return Math.round((b - a) / 86400000) + 1;
+  }
+  function formatContainerNumber(code){
+    if (!code || code.length !== 11) return code || '';
+    return code.slice(0,4) + ' ' + code.slice(4,10) + '-' + code.slice(10);
+  }
+  function escapeHtml(s){
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){
+      return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c];
+    });
+  }
+
+  // ==========================================================================
+  // ISO 6346 — перевірка контрольної цифри
+  // ==========================================================================
+  const ISO_LETTER_VALUES = (function(){
+    const map = {}; let value = 10;
+    for (let i = 0; i < 26; i++){
+      const letter = String.fromCharCode(65 + i);
+      if (value % 11 === 0) value++;
+      map[letter] = value; value++;
+    }
+    return map;
+  })();
+
+  function validateIso6346(raw){
+    const code = (raw || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 11);
+    if (code.length < 11) return { code:code, state:'incomplete' };
+    if (!/^[A-Z]{4}[0-9]{7}$/.test(code)) return { code:code, state:'format' };
+    let sum = 0;
+    for (let i = 0; i < 10; i++){
+      const ch = code[i];
+      const val = /[0-9]/.test(ch) ? parseInt(ch, 10) : ISO_LETTER_VALUES[ch];
+      sum += val * Math.pow(2, i);
+    }
+    let check = sum % 11;
+    if (check === 10) check = 0;
+    return { code:code, state: check === parseInt(code[10], 10) ? 'valid' : 'checkdigit' };
+  }
+
+  // ==========================================================================
+  // API
+  // ==========================================================================
+  async function apiCall(action, params){
+    params = params || {};
+    const url = new URL(API_URL);
+    url.searchParams.set('action', action);
+    Object.keys(params).forEach(function(k){
+      if (params[k] !== undefined && params[k] !== null) url.searchParams.set(k, params[k]);
+    });
+    let res;
+    try{
+      res = await fetch(url.toString());
+    } catch(err){
+      throw new Error("Не вдалося з'єднатися з сервером. Перевірте інтернет-з'єднання та URL_API у файлі index.html.");
+    }
+    if (!res.ok) throw new Error('Сервер повернув помилку: ' + res.status);
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Невідома помилка сервера');
+    return data;
+  }
+
+  // ==========================================================================
+  // UI helpers: toast, loading, modal
+  // ==========================================================================
+  function showToast(message, type){
+    const root = document.getElementById('toast-root');
+    const el = document.createElement('div');
+    el.className = 'toast' + (type ? ' toast--' + type : '');
+    el.textContent = message;
+    root.appendChild(el);
+    setTimeout(function(){ el.remove(); }, 3800);
+  }
+
+  let loadingCount = 0;
+  function setLoading(on){
+    loadingCount += on ? 1 : -1;
+    if (loadingCount < 0) loadingCount = 0;
+    document.getElementById('loading-overlay').classList.toggle('hidden', loadingCount === 0);
+  }
+
+  function closeModal(){ document.getElementById('modal-root').innerHTML = ''; }
+  function showModal(opts){
+    const root = document.getElementById('modal-root');
+    const backdrop = document.createElement('div');
+    backdrop.className = 'modal-backdrop';
+    backdrop.addEventListener('click', function(e){ if (e.target === backdrop) closeModal(); });
+    const card = document.createElement('div');
+    card.className = 'modal-card';
+    card.innerHTML = '<h2 class="modal-title">' + escapeHtml(opts.title) + '</h2><div class="modal-body"></div><div class="modal-actions"></div>';
+    card.querySelector('.modal-body').innerHTML = opts.bodyHtml;
+    const actions = card.querySelector('.modal-actions');
+    (opts.buttons || []).forEach(function(b){
+      const btn = document.createElement('button');
+      btn.className = b.className || 'btn';
+      btn.textContent = b.label;
+      btn.addEventListener('click', b.onClick);
+      actions.appendChild(btn);
+    });
+    backdrop.appendChild(card);
+    root.innerHTML = '';
+    root.appendChild(backdrop);
+    return card;
+  }
+  function confirmDialog(message){
+    return new Promise(function(resolve){
+      showModal({
+        title: 'Підтвердження',
+        bodyHtml: '<p style="margin:0;font-size:14px;">' + escapeHtml(message) + '</p>',
+        buttons: [
+          { label:'Скасувати', className:'btn btn-ghost', onClick:function(){ closeModal(); resolve(false); } },
+          { label:'Так, продовжити', className:'btn btn-stop', onClick:function(){ closeModal(); resolve(true); } }
+        ]
+      });
+    });
+  }
+
+  // ==========================================================================
+  // Стан і навігація
+  // ==========================================================================
+  const state = { currentUser:null, users:[], containers:[] };
+
+  function showScreen(name){
+    document.querySelectorAll('.screen').forEach(function(s){ s.classList.add('hidden'); });
+    document.getElementById('screen-' + name).classList.remove('hidden');
+    document.querySelectorAll('.topnav button').forEach(function(b){
+      b.classList.toggle('active', b.dataset.nav === name);
+    });
+    if (name === 'departure') loadDepartureScreen();
+    if (name === 'stock') loadStockScreen();
+    if (name === 'arrival') resetArrivalForm();
+  }
+  document.addEventListener('click', function(e){
+    const nav = e.target.closest('[data-nav]');
+    if (nav) showScreen(nav.dataset.nav);
+  });
+
+  function statusClass(status){
+    if (status === 'Export') return 'export';
+    if (status === 'Import') return 'import';
+    return 'empty';
+  }
+
+  // ==========================================================================
+  // Логін
+  // ==========================================================================
+  function renderUserSelect(){
+    const sel = document.getElementById('login-select');
+    sel.innerHTML = '';
+    if (state.users.length === 0){
+      const opt = document.createElement('option');
+      opt.value = ''; opt.textContent = 'Ще немає жодного користувача';
+      sel.appendChild(opt);
+    }
+    state.users.forEach(function(name){
+      const opt = document.createElement('option');
+      opt.value = name; opt.textContent = name;
+      sel.appendChild(opt);
+    });
+  }
+
+  async function initLogin(){
+    const errEl = document.getElementById('login-error');
+    errEl.classList.add('hidden');
+    try{
+      const data = await apiCall('getUsers');
+      state.users = data.users;
+      renderUserSelect();
+    } catch(err){
+      errEl.textContent = err.message;
+      errEl.classList.remove('hidden');
+    }
+  }
+
+  document.getElementById('login-continue').addEventListener('click', function(){
+    const sel = document.getElementById('login-select');
+    if (!sel.value){ showToast("Оберіть ім'я зі списку або додайте нове", 'error'); return; }
+    loginAs(sel.value);
+  });
+  document.getElementById('login-new-toggle').addEventListener('click', function(){
+    document.getElementById('login-new-block').classList.toggle('hidden');
+  });
+  document.getElementById('login-new-submit').addEventListener('click', async function(){
+    const input = document.getElementById('login-new-name');
+    const name = input.value.trim();
+    if (!name){ showToast("Введіть ім'я", 'error'); return; }
+    setLoading(true);
+    try{
+      const data = await apiCall('addUser', { name:name });
+      state.users = data.users;
+      renderUserSelect();
+      input.value = '';
+      loginAs(name);
+    } catch(err){ showToast(err.message, 'error'); }
+    finally{ setLoading(false); }
+  });
+
+  function loginAs(name){
+    state.currentUser = name;
+    document.getElementById('user-badge-name').textContent = name;
+    document.getElementById('topbar').classList.remove('hidden');
+    showScreen('menu');
+  }
+  document.getElementById('switch-user-btn').addEventListener('click', function(){
+    state.currentUser = null;
+    showScreen('login');
+    initLogin();
+  });
+
+  // ==========================================================================
+  // Прихід
+  // ==========================================================================
+  const arrivalNumberInput = document.getElementById('arrival-number');
+  const lockBadge = document.getElementById('lock-badge');
+  const lockBadgeContent = document.getElementById('lock-badge-content');
+  const plateHint = document.getElementById('plate-hint');
+  let arrivalValidation = { code:'', state:'incomplete' };
+
+  arrivalNumberInput.addEventListener('input', function(e){
+    const el = e.target;
+    const prevLen = el.value.length;
+    const cursor = el.selectionStart;
+    const cleaned = el.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 11);
+    const diff = prevLen - cleaned.length;
+    el.value = cleaned;
+    const pos = Math.max(0, cursor - diff);
+    el.setSelectionRange(pos, pos);
+    arrivalValidation = validateIso6346(cleaned);
+    updatePlateUi();
+    updateArrivalSubmitState();
+  });
+
+  function updatePlateUi(){
+    const v = arrivalValidation;
+    lockBadge.className = 'lock-badge';
+    plateHint.className = 'plate-hint';
+    if (v.state === 'incomplete'){
+      lockBadgeContent.textContent = v.code.length === 0 ? '–' : String(11 - v.code.length);
+      plateHint.textContent = v.code.length === 0
+        ? "Введіть 4 літери коду власника + 7 цифр серійного номера"
+        : 'Ще ' + (11 - v.code.length) + ' символів';
+    } else if (v.state === 'format'){
+      lockBadge.classList.add('lock-badge--invalid');
+      lockBadgeContent.textContent = '✕';
+      plateHint.textContent = 'Формат: 4 літери, потім 7 цифр';
+      plateHint.classList.add('is-error');
+    } else if (v.state === 'checkdigit'){
+      lockBadge.classList.add('lock-badge--invalid');
+      lockBadgeContent.textContent = '✕';
+      plateHint.textContent = 'Невірна контрольна цифра — перевірте номер (ISO 6346)';
+      plateHint.classList.add('is-error');
+    } else if (v.state === 'valid'){
+      lockBadge.classList.add('lock-badge--valid');
+      lockBadgeContent.textContent = '✓';
+      plateHint.textContent = 'Номер коректний';
+      plateHint.classList.add('is-ok');
+    }
+  }
+
+  function updateArrivalSubmitState(){
+    const ok = arrivalValidation.state === 'valid'
+      && document.getElementById('arrival-status').value
+      && document.getElementById('arrival-type').value
+      && document.getElementById('arrival-location').value
+      && document.getElementById('arrival-date').value;
+    document.getElementById('arrival-submit').disabled = !ok;
+  }
+  ['arrival-status','arrival-type','arrival-location','arrival-date'].forEach(function(id){
+    document.getElementById(id).addEventListener('change', updateArrivalSubmitState);
+  });
+
+  function resetArrivalForm(){
+    document.getElementById('arrival-form').reset();
+    arrivalNumberInput.value = '';
+    arrivalValidation = validateIso6346('');
+    updatePlateUi();
+    document.getElementById('arrival-date').value = todayStr();
+    document.getElementById('arrival-date').max = todayStr();
+    updateArrivalSubmitState();
+  }
+
+  document.getElementById('arrival-form').addEventListener('submit', async function(e){
+    e.preventDefault();
+    if (document.getElementById('arrival-submit').disabled) return;
+
+    const number = arrivalValidation.code;
+    const payload = {
+      number:number,
+      status:document.getElementById('arrival-status').value,
+      type:document.getElementById('arrival-type').value,
+      location:document.getElementById('arrival-location').value,
+      line:document.getElementById('arrival-line').value,
+      date:document.getElementById('arrival-date').value,
+      user:state.currentUser
+    };
+
+    const dup = state.containers.find(function(c){ return c.number === number; });
+    if (dup){
+      const proceed = await confirmDialog('Контейнер ' + formatContainerNumber(number) + ' вже значиться на терміналі. Все одно зберегти новий прихід?');
+      if (!proceed) return;
+    }
+
+    setLoading(true);
+    try{
+      await apiCall('addArrival', payload);
+      showToast('Прихід контейнера ' + formatContainerNumber(number) + ' збережено', 'success');
+      resetArrivalForm();
+      refreshContainers();
+    } catch(err){ showToast(err.message, 'error'); }
+    finally{ setLoading(false); }
+  });
+
+  // ==========================================================================
+  // Дані про контейнери (спільні для Розхід/Залишки)
+  // ==========================================================================
+  async function refreshContainers(){
+    const data = await apiCall('getContainers');
+    state.containers = data.containers;
+    return state.containers;
+  }
+
+  // ==========================================================================
+  // Розхід
+  // ==========================================================================
+  async function loadDepartureScreen(){
+    setLoading(true);
+    try{ await refreshContainers(); renderDepartureTable(); }
+    catch(err){ showToast(err.message, 'error'); }
+    finally{ setLoading(false); }
+  }
+  document.getElementById('departure-search').addEventListener('input', renderDepartureTable);
+
+  function renderDepartureTable(){
+    const q = document.getElementById('departure-search').value.trim().toUpperCase();
+    const tbody = document.getElementById('departure-tbody');
+    tbody.innerHTML = '';
+    const rows = state.containers.filter(function(c){ return !q || c.number.indexOf(q) !== -1; });
+    document.getElementById('departure-empty').classList.toggle('hidden', rows.length > 0);
+
+    rows.forEach(function(c){
+      const tr = document.createElement('tr');
+      const days = daysInclusive(c.arrivalDate, todayStr());
+      tr.innerHTML =
+        '<td class="mono-cell">' + escapeHtml(formatContainerNumber(c.number)) + '</td>' +
+        '<td><span class="badge badge--' + statusClass(c.status) + '">' + escapeHtml(c.status) + '</span></td>' +
+        '<td>' + escapeHtml(c.type) + '</td>' +
+        '<td>' + escapeHtml(c.location) + '</td>' +
+        '<td>' + escapeHtml(c.line || '—') + '</td>' +
+        '<td>' + escapeHtml(c.arrivalDate) + '</td>' +
+        '<td>' + days + '</td>' +
+        '<td class="row-menu-wrap"><button class="row-menu-btn" aria-label="Дії">⋮</button></td>';
+      tr.querySelector('.row-menu-btn').addEventListener('click', function(e){
+        e.stopPropagation();
+        openRowMenu(e.currentTarget, c);
+      });
+      tbody.appendChild(tr);
+    });
+  }
+
+  function openRowMenu(anchor, container){
+    document.querySelectorAll('.row-menu').forEach(function(m){ m.remove(); });
+    const menu = document.createElement('div');
+    menu.className = 'row-menu';
+    menu.innerHTML = '<button>Створити розхід</button>';
+    menu.querySelector('button').addEventListener('click', function(){
+      menu.remove();
+      openDepartureModal(container);
+    });
+    anchor.parentElement.appendChild(menu);
+    setTimeout(function(){
+      document.addEventListener('click', function closeOnce(){
+        menu.remove();
+        document.removeEventListener('click', closeOnce);
+      }, { once:true });
+    }, 0);
+  }
+
+  function openDepartureModal(container){
+    const bodyHtml =
+      '<div class="modal-plate"><span class="modal-plate-number">' + escapeHtml(formatContainerNumber(container.number)) + '</span>' +
+      '<span class="badge badge--' + statusClass(container.status) + '">' + escapeHtml(container.status) + '</span></div>' +
+      '<dl class="modal-meta">' +
+      '<dt>Тип</dt><dd>' + escapeHtml(container.type) + '</dd>' +
+      '<dt>Локація</dt><dd>' + escapeHtml(container.location) + '</dd>' +
+      '<dt>Лінія</dt><dd>' + escapeHtml(container.line || '—') + '</dd>' +
+      '<dt>Дата приходу</dt><dd>' + escapeHtml(container.arrivalDate) + '</dd>' +
+      '</dl>' +
+      '<label class="field-label" for="modal-departure-date">Дата розходу</label>' +
+      '<input id="modal-departure-date" type="date" />';
+
+    showModal({
+      title:'Розхід контейнера',
+      bodyHtml:bodyHtml,
+      buttons:[
+        { label:'Скасувати', className:'btn btn-ghost', onClick:closeModal },
+        { label:'Провести', className:'btn btn-primary', onClick:function(){ submitDeparture(container); } }
+      ]
+    });
+    const dateInput = document.getElementById('modal-departure-date');
+    dateInput.min = container.arrivalDate;
+    dateInput.max = todayStr();
+    dateInput.value = todayStr();
+  }
+
+  async function submitDeparture(container){
+    const date = document.getElementById('modal-departure-date').value;
+    if (!date){ showToast('Оберіть дату розходу', 'error'); return; }
+    setLoading(true);
+    try{
+      await apiCall('addDeparture', { number:container.number, date:date, user:state.currentUser });
+      closeModal();
+      showToast('Розхід контейнера ' + formatContainerNumber(container.number) + ' проведено', 'success');
+      await refreshContainers();
+      renderDepartureTable();
+    } catch(err){ showToast(err.message, 'error'); }
+    finally{ setLoading(false); }
+  }
+
+  // ==========================================================================
+  // Залишки
+  // ==========================================================================
+  async function loadStockScreen(){
+    setLoading(true);
+    try{ await refreshContainers(); renderStockTable(); }
+    catch(err){ showToast(err.message, 'error'); }
+    finally{ setLoading(false); }
+  }
+  document.getElementById('stock-search').addEventListener('input', renderStockTable);
+  document.getElementById('stock-refresh').addEventListener('click', loadStockScreen);
+
+  function renderStockTable(){
+    const q = document.getElementById('stock-search').value.trim().toUpperCase();
+    const tbody = document.getElementById('stock-tbody');
+    tbody.innerHTML = '';
+    const rows = state.containers.filter(function(c){ return !q || c.number.indexOf(q) !== -1; });
+    document.getElementById('stock-empty').classList.toggle('hidden', rows.length > 0);
+    document.getElementById('stock-summary').textContent = 'Разом на терміналі: ' + state.containers.length;
+
+    rows.forEach(function(c){
+      const tr = document.createElement('tr');
+      const days = daysInclusive(c.arrivalDate, todayStr());
+      tr.innerHTML =
+        '<td class="mono-cell">' + escapeHtml(formatContainerNumber(c.number)) + '</td>' +
+        '<td><span class="badge badge--' + statusClass(c.status) + '">' + escapeHtml(c.status) + '</span></td>' +
+        '<td>' + escapeHtml(c.type) + '</td>' +
+        '<td>' + escapeHtml(c.location) + '</td>' +
+        '<td>' + escapeHtml(c.line || '—') + '</td>' +
+        '<td>' + escapeHtml(c.arrivalDate) + '</td>' +
+        '<td>' + days + '</td>' +
+        '<td>' + escapeHtml(c.user || '—') + '</td>';
+      tbody.appendChild(tr);
+    });
+  }
+
+  // ==========================================================================
+  // Звіти
+  // ==========================================================================
+  let lastReportStays = [];
+
+  document.getElementById('report-generate').addEventListener('click', async function(){
+    const from = document.getElementById('report-from').value;
+    const to = document.getElementById('report-to').value;
+    if (!from || !to){ showToast('Вкажіть обидві дати періоду', 'error'); return; }
+    const includeOpen = document.getElementById('report-include-open').checked;
+    setLoading(true);
+    try{
+      const data = await apiCall('getReport', { from:from, to:to, includeOpen: includeOpen ? '1' : '0' });
+      lastReportStays = data.stays;
+      renderReportTable();
+    } catch(err){ showToast(err.message, 'error'); }
+    finally{ setLoading(false); }
+  });
+
+  function renderReportTable(){
+    const tbody = document.getElementById('report-tbody');
+    tbody.innerHTML = '';
+    document.getElementById('report-empty').classList.toggle('hidden', lastReportStays.length > 0);
+    document.getElementById('report-export').disabled = lastReportStays.length === 0;
+
+    let totalDays = 0;
+    lastReportStays.forEach(function(s){
+      totalDays += s.days;
+      const tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td class="mono-cell">' + escapeHtml(formatContainerNumber(s.number)) + '</td>' +
+        '<td>' + escapeHtml(s.arrivalDate) + '</td>' +
+        '<td>' + (s.departureDate ? escapeHtml(s.departureDate) : '<em>ще на терміналі</em>') + '</td>' +
+        '<td>' + s.days + '</td>';
+      tbody.appendChild(tr);
+    });
+
+    document.getElementById('report-summary').textContent = lastReportStays.length
+      ? 'Контейнерів у звіті: ' + lastReportStays.length + ' · Середній термін зберігання: ' + (totalDays / lastReportStays.length).toFixed(1) + ' дн.'
+      : '';
+  }
+
+  document.getElementById('report-export').addEventListener('click', function(){
+    const rows = [['Номер', 'Дата приходу', 'Дата розходу', 'Днів зберігання']];
+    lastReportStays.forEach(function(s){
+      rows.push([formatContainerNumber(s.number), s.arrivalDate, s.departureDate || 'ще на терміналі', s.days]);
+    });
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Звіт');
+    const from = document.getElementById('report-from').value;
+    const to = document.getElementById('report-to').value;
+    XLSX.writeFile(wb, 'TOS-zvit_' + from + '_' + to + '.xlsx');
+  });
+
+  // ==========================================================================
+  // Ініціалізація
+  // ==========================================================================
+  (function init(){
+    if (!API_URL || API_URL.indexOf('ВСТАВТЕ_СЮДИ') !== -1){
+      document.getElementById('setup-banner').classList.remove('hidden');
+      document.getElementById('screen-login').innerHTML =
+        '<div class="login-card"><p style="margin:0;">Застосунок ще не підключено до бекенду.</p>' +
+        '<p style="margin:10px 0 0;color:var(--muted);font-size:13.5px;">Дивіться README.md: потрібно вставити URL Apps Script у змінну <code>API_URL</code> на початку index.html.</p></div>';
+      return;
+    }
+    document.getElementById('arrival-date').max = todayStr();
+    initLogin();
+  })();
+</script>
+</body>
+</html>
