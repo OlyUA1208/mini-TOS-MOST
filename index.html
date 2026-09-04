@@ -1113,8 +1113,8 @@
   // Ініціалізація
   // ==========================================================================
   (function init(){
-    if (!API_URL || API_URL.indexOf('https://script.google.com/macros/s/AKfycbwuu3cRAgU-7jfH5vQI3mY3ZHnGoA26Vs1YednXxOrkIz7P16_LzAPd95vMLXhZLpqj/exec') !== -1){
-      document.getElementById('setup-banner').classList.remove('hidden');
+if (!API_URL || API_URL.indexOf('ВСТАВТЕ_СЮДИ') !== -1){
+  document.getElementById('setup-banner').classList.remove('hidden');
       document.getElementById('screen-login').innerHTML =
         '<div class="login-card"><p style="margin:0;">Застосунок ще не підключено до бекенду.</p>' +
         '<p style="margin:10px 0 0;color:var(--muted);font-size:13.5px;">Дивіться README.md: потрібно вставити URL Apps Script у змінну <code>API_URL</code> на початку index.html.</p></div>';
