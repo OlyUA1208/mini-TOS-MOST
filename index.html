@@ -183,6 +183,21 @@
   .checkbox-field{ display:flex; align-items:center; gap:8px; font-size:13.5px; color:var(--muted); grid-column:1 / -1; }
   .checkbox-field input{ width:auto; margin:0; }
 
+  /* ---------- Комбобокс (Лінія) ---------- */
+  .combo-wrap{ position:relative; }
+  .combo-wrap input{ margin-bottom:0; }
+  .combo-dropdown{
+    position:absolute; left:0; right:0; top:100%; margin-top:4px; z-index:15;
+    background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+    box-shadow:var(--shadow-md); max-height:220px; overflow-y:auto;
+  }
+  .combo-option{
+    display:block; width:100%; text-align:left; background:none; border:none;
+    padding:9px 12px; font-size:14px; font-family:var(--font-body); cursor:pointer; color:var(--ink);
+  }
+  .combo-option:hover{ background:var(--yard); }
+  .combo-empty{ padding:9px 12px; font-size:13px; color:var(--muted); }
+
   /* ---------- Tables ---------- */
   .search-input{ max-width:320px; margin-bottom:16px; }
   .stock-toolbar{ display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
@@ -208,7 +223,14 @@
   .badge--export{ background:var(--amber-deep); }
   .badge--import{ background:var(--go); }
 
-  .row-menu-wrap{ position:relative; text-align:right; }
+  .row-menu-wrap{ position:sticky; right:0; text-align:right; background:var(--surface); border-left:1px solid var(--line); }
+  .data-table tbody tr:hover .row-menu-wrap{ background:#f7f8f7; }
+  .th-actions{ position:sticky; right:0; background:var(--surface); border-left:1px solid var(--line); }
+
+  .row-departed{ color:var(--muted); background:rgba(91,102,112,0.05); }
+  .row-departed .badge{ opacity:.6; }
+  .row-departed .row-menu-wrap{ background:inherit; }
+  .departed-note{ font-size:12.5px; font-style:italic; color:var(--muted); white-space:nowrap; }
   .row-menu-btn{
     background:none; border:none; cursor:pointer; font-size:18px; color:var(--muted);
     padding:4px 8px; border-radius:var(--radius); line-height:1;
@@ -375,17 +397,12 @@
               <option value="МС">МС</option>
             </select>
           </div>
-          <div class="field">
-            <label class="field-label" for="arrival-line">Лінія</label>
-            <select id="arrival-line">
-              <option value="">не вказано</option>
-              <option>Cosco</option>
-              <option>Evergreen</option>
-              <option>CMA</option>
-              <option>ONE</option>
-              <option>Maersk</option>
-              <option>Hapag</option>
-            </select>
+          <div class="field combo-field">
+            <label class="field-label" for="arrival-line-input">Лінія</label>
+            <div class="combo-wrap">
+              <input id="arrival-line-input" type="text" autocomplete="off" placeholder="Почніть вводити або оберіть зі списку" />
+              <div id="arrival-line-dropdown" class="combo-dropdown hidden"></div>
+            </div>
           </div>
           <div class="field">
             <label class="field-label" for="arrival-date">Дата приходу *</label>
@@ -404,7 +421,7 @@
       <div class="table-wrap">
         <table class="data-table">
           <thead>
-            <tr><th>Номер</th><th>Статус</th><th>Тип</th><th>Локація</th><th>Лінія</th><th>Прихід</th><th>Днів</th><th></th></tr>
+            <tr><th>Номер</th><th>Статус</th><th>Тип</th><th>Локація</th><th>Лінія</th><th>Прихід</th><th>Днів</th><th class="th-actions"></th></tr>
           </thead>
           <tbody id="departure-tbody"></tbody>
         </table>
@@ -476,7 +493,7 @@
   // ==========================================================================
   // НАЛАШТУВАННЯ — вставте URL вашого Apps Script Web App (закінчується на /exec)
   // ==========================================================================
-  const API_URL = "https://script.google.com/macros/s/AKfycbwuu3cRAgU-7jfH5vQI3mY3ZHnGoA26Vs1YednXxOrkIz7P16_LzAPd95vMLXhZLpqj/exec";
+  const API_URL = "ВСТАВТЕ_СЮДИ_URL_ВАШОГО_APPS_SCRIPT_ПІСЛЯ_ДЕПЛОЮ";
 
   // Приклад для власного хостингу (поза Claude.ai), щоб застосунок пам'ятав
   // обраного користувача між сесіями — просто розкоментуйте ці 2 місця:
@@ -713,6 +730,54 @@
   const plateHint = document.getElementById('plate-hint');
   let arrivalValidation = { code:'', state:'incomplete' };
 
+  // ---------- Комбобокс "Лінія": вибір лише зі списку, з підказкою за номером ----------
+  let LINE_OPTIONS = ['SOC'];
+  let LINE_PREFIX_MAP = {};
+  let arrivalLineConfirmed = '';
+  const lineInput = document.getElementById('arrival-line-input');
+  const lineDropdown = document.getElementById('arrival-line-dropdown');
+
+  async function loadLineCodes(){
+    try{
+      const data = await apiCall('getLineCodes');
+      LINE_OPTIONS = data.lines.concat(['SOC']).sort();
+      LINE_PREFIX_MAP = {};
+      data.codes.forEach(function(c){ LINE_PREFIX_MAP[c.prefix] = c.line; });
+    } catch(err){
+      LINE_OPTIONS = ['SOC']; // список ліній не завантажився — SOC лишається доступним, форма й так працює
+    }
+  }
+
+  function renderLineDropdown(filterText){
+    const q = (filterText || '').trim().toLowerCase();
+    const matches = LINE_OPTIONS.filter(function(l){ return l.toLowerCase().indexOf(q) !== -1; });
+    lineDropdown.innerHTML = matches.length === 0
+      ? '<div class="combo-empty">Нічого не знайдено</div>'
+      : matches.map(function(l){ return '<button type="button" class="combo-option" data-value="' + escapeHtml(l) + '">' + escapeHtml(l) + '</button>'; }).join('');
+    lineDropdown.classList.remove('hidden');
+  }
+
+  lineInput.addEventListener('focus', function(){ renderLineDropdown(lineInput.value); });
+  lineInput.addEventListener('input', function(){
+    arrivalLineConfirmed = '';
+    renderLineDropdown(lineInput.value);
+  });
+  lineDropdown.addEventListener('click', function(e){
+    const btn = e.target.closest('.combo-option');
+    if (!btn) return;
+    lineInput.value = btn.dataset.value;
+    arrivalLineConfirmed = btn.dataset.value;
+    lineDropdown.classList.add('hidden');
+  });
+  lineInput.addEventListener('blur', function(){
+    setTimeout(function(){
+      lineDropdown.classList.add('hidden');
+      if (lineInput.value && lineInput.value !== arrivalLineConfirmed){
+        lineInput.value = ''; // введене не підтверджене вибором зі списку — не приймаємо довільний текст
+      }
+    }, 150);
+  });
+
   arrivalNumberInput.addEventListener('input', function(e){
     const el = e.target;
     const prevLen = el.value.length;
@@ -724,8 +789,19 @@
     el.setSelectionRange(pos, pos);
     arrivalValidation = validateIso6346(cleaned);
     updatePlateUi();
+    suggestLineFromNumber();
     updateArrivalSubmitState();
   });
+
+  function suggestLineFromNumber(){
+    if (arrivalValidation.state !== 'valid') return;
+    if (lineInput.value) return; // не перебиваємо те, що користувач уже сам обрав чи ввів
+    const suggested = LINE_PREFIX_MAP[arrivalValidation.code.slice(0, 4)];
+    if (suggested){
+      lineInput.value = suggested;
+      arrivalLineConfirmed = suggested;
+    }
+  }
 
   function updatePlateUi(){
     const v = arrivalValidation;
@@ -771,6 +847,9 @@
     arrivalNumberInput.value = '';
     arrivalValidation = validateIso6346('');
     updatePlateUi();
+    lineInput.value = '';
+    arrivalLineConfirmed = '';
+    lineDropdown.classList.add('hidden');
     document.getElementById('arrival-date').value = todayStr();
     document.getElementById('arrival-date').max = todayStr();
     updateArrivalSubmitState();
@@ -786,7 +865,7 @@
       status:document.getElementById('arrival-status').value,
       type:document.getElementById('arrival-type').value,
       location:document.getElementById('arrival-location').value,
-      line:document.getElementById('arrival-line').value,
+      line:arrivalLineConfirmed,
       date:document.getElementById('arrival-date').value,
       user:state.currentUser
     };
@@ -821,7 +900,13 @@
   // ==========================================================================
   async function loadDepartureScreen(){
     setLoading(true);
-    try{ await refreshContainers(); renderDepartureTable(); }
+    try{
+      const data = await apiCall('getDepartureBoard');
+      state.onTerminal = data.onTerminal;
+      state.recentlyDeparted = data.recentlyDeparted;
+      state.containers = data.onTerminal; // та сама на терміналі-вибірка, що й раніше живила Прихід/Залишки
+      renderDepartureTable();
+    }
     catch(err){ showToast(err.message, 'error'); }
     finally{ setLoading(false); }
   }
@@ -831,37 +916,46 @@
     const q = document.getElementById('departure-search').value.trim().toUpperCase();
     const tbody = document.getElementById('departure-tbody');
     tbody.innerHTML = '';
-    const rows = state.containers.filter(function(c){ return !q || c.number.indexOf(q) !== -1; });
-    document.getElementById('departure-empty').classList.toggle('hidden', rows.length > 0);
+    const onRows = (state.onTerminal || []).filter(function(c){ return !q || c.number.indexOf(q) !== -1; });
+    const departedRows = (state.recentlyDeparted || []).filter(function(c){ return !q || c.number.indexOf(q) !== -1; });
+    document.getElementById('departure-empty').classList.toggle('hidden', onRows.length > 0 || departedRows.length > 0);
 
-    rows.forEach(function(c){
-      const tr = document.createElement('tr');
-      const days = daysInclusive(c.arrivalDate, todayStr());
-      tr.innerHTML =
-        '<td class="mono-cell">' + escapeHtml(formatContainerNumber(c.number)) + '</td>' +
-        '<td><span class="badge badge--' + statusClass(c.status) + '">' + escapeHtml(c.status) + '</span></td>' +
-        '<td>' + escapeHtml(c.type) + '</td>' +
-        '<td>' + escapeHtml(c.location) + '</td>' +
-        '<td>' + escapeHtml(c.line || '—') + '</td>' +
-        '<td>' + escapeHtml(c.arrivalDate) + '</td>' +
-        '<td>' + days + '</td>' +
-        '<td class="row-menu-wrap"><button class="row-menu-btn" aria-label="Дії">⋮</button></td>';
-      tr.querySelector('.row-menu-btn').addEventListener('click', function(e){
-        e.stopPropagation();
-        openRowMenu(e.currentTarget, c);
-      });
-      tbody.appendChild(tr);
-    });
+    onRows.forEach(function(c){ tbody.appendChild(buildDepartureRow(c, false)); });
+    departedRows.forEach(function(c){ tbody.appendChild(buildDepartureRow(c, true)); });
   }
 
-  function openRowMenu(anchor, container){
+  function buildDepartureRow(c, isDeparted){
+    const tr = document.createElement('tr');
+    if (isDeparted) tr.classList.add('row-departed');
+    const days = daysInclusive(c.arrivalDate, todayStr());
+    const daysCell = isDeparted
+      ? '<span class="departed-note">вибув ' + escapeHtml(c.departureDate) + '</span>'
+      : String(days);
+    tr.innerHTML =
+      '<td class="mono-cell">' + escapeHtml(formatContainerNumber(c.number)) + '</td>' +
+      '<td><span class="badge badge--' + statusClass(c.status) + '">' + escapeHtml(c.status) + '</span></td>' +
+      '<td>' + escapeHtml(c.type) + '</td>' +
+      '<td>' + escapeHtml(c.location) + '</td>' +
+      '<td>' + escapeHtml(c.line || '—') + '</td>' +
+      '<td>' + escapeHtml(c.arrivalDate || '—') + '</td>' +
+      '<td>' + daysCell + '</td>' +
+      '<td class="row-menu-wrap"><button class="row-menu-btn" aria-label="Дії">⋮</button></td>';
+    tr.querySelector('.row-menu-btn').addEventListener('click', function(e){
+      e.stopPropagation();
+      openRowMenu(e.currentTarget, c, isDeparted);
+    });
+    return tr;
+  }
+
+  function openRowMenu(anchor, container, isDeparted){
     document.querySelectorAll('.row-menu').forEach(function(m){ m.remove(); });
     const menu = document.createElement('div');
     menu.className = 'row-menu';
-    menu.innerHTML = '<button>Створити розхід</button>';
+    menu.innerHTML = '<button>' + (isDeparted ? 'Відмінити розхід' : 'Створити розхід') + '</button>';
     menu.querySelector('button').addEventListener('click', function(){
       menu.remove();
-      openDepartureModal(container);
+      if (isDeparted) confirmUndoDeparture(container);
+      else openDepartureModal(container);
     });
     anchor.parentElement.appendChild(menu);
     setTimeout(function(){
@@ -870,6 +964,18 @@
         document.removeEventListener('click', closeOnce);
       }, { once:true });
     }, 0);
+  }
+
+  async function confirmUndoDeparture(container){
+    const proceed = await confirmDialog('Повернути контейнер ' + formatContainerNumber(container.number) + ' на зберігання з тими самими даними?');
+    if (!proceed) return;
+    setLoading(true);
+    try{
+      await apiCall('undoDeparture', { number:container.number, user:state.currentUser });
+      showToast('Контейнер ' + formatContainerNumber(container.number) + ' повернуто на зберігання', 'success');
+      await loadDepartureScreen();
+    } catch(err){ showToast(err.message, 'error'); }
+    finally{ setLoading(false); }
   }
 
   function openDepartureModal(container){
@@ -907,8 +1013,7 @@
       await apiCall('addDeparture', { number:container.number, date:date, user:state.currentUser });
       closeModal();
       showToast('Розхід контейнера ' + formatContainerNumber(container.number) + ' проведено', 'success');
-      await refreshContainers();
-      renderDepartureTable();
+      await loadDepartureScreen();
     } catch(err){ showToast(err.message, 'error'); }
     finally{ setLoading(false); }
   }
@@ -1016,6 +1121,7 @@
       return;
     }
     document.getElementById('arrival-date').max = todayStr();
+    loadLineCodes();
     initLogin();
   })();
 </script>
