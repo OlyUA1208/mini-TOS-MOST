@@ -237,9 +237,9 @@
   }
   .row-menu-btn:hover{ background:rgba(0,0,0,.06); }
   .row-menu{
-    position:absolute; right:0; top:100%; margin-top:4px; background:var(--surface);
+    background:var(--surface);
     border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow-md);
-    z-index:10; min-width:170px; overflow:hidden;
+    z-index:50; min-width:170px; overflow:hidden;
   }
   .row-menu button{
     display:block; width:100%; text-align:left; background:none; border:none;
@@ -253,6 +253,7 @@
     justify-content:center; z-index:100; padding:20px;
   }
   .modal-card{ background:var(--surface); border-radius:var(--radius); box-shadow:var(--shadow-md); width:100%; max-width:420px; padding:24px; }
+  .modal-card--wide{ max-width:600px; }
   .modal-title{ font-family:var(--font-display); font-weight:700; font-size:19px; margin:0 0 16px; }
   .modal-plate{ display:flex; align-items:center; gap:10px; margin-bottom:14px; flex-wrap:wrap; }
   .modal-plate-number{ font-family:var(--font-mono); font-weight:700; font-size:17px; letter-spacing:.08em; }
@@ -260,6 +261,33 @@
   .modal-meta dt{ color:var(--muted); }
   .modal-meta dd{ margin:0; font-weight:500; }
   .modal-actions{ display:flex; gap:10px; justify-content:flex-end; margin-top:20px; }
+
+  /* ---------- Вибір чарунки в бухті ---------- */
+  .yard-picker{ display:flex; gap:16px; align-items:flex-start; }
+  .yard-tiers{ display:flex; flex-direction:column; gap:6px; flex-shrink:0; width:84px; }
+  .yard-tier-btn{
+    background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+    padding:10px 8px; font-family:var(--font-body); font-weight:600; font-size:12.5px;
+    color:var(--muted); cursor:pointer; white-space:nowrap; text-align:center;
+    transition:background .15s ease,color .15s ease,border-color .15s ease;
+  }
+  .yard-tier-btn.active{ background:var(--steel); border-color:var(--steel); color:#fff; }
+  .yard-tier-btn:hover:not(.active){ border-color:var(--steel); color:var(--ink); }
+  .yard-grid{ display:grid; gap:6px; flex:1; }
+  .yard-cell{
+    aspect-ratio:1; border-radius:4px; border:2px solid var(--line); cursor:pointer;
+    display:flex; align-items:center; justify-content:center; padding:2px; min-width:0;
+    background:var(--yard); transition:transform .1s ease,border-color .15s ease,background .15s ease;
+  }
+  .yard-cell--empty:hover{ border-color:var(--steel); transform:translateY(-1px); }
+  .yard-cell--occupied{ background:var(--steel-deep); border-color:var(--steel-deep); cursor:not-allowed; }
+  .yard-cell--selected{ background:var(--go); border-color:var(--go); }
+  .yard-cell-num{
+    font-family:var(--font-mono); font-size:9px; font-weight:700; color:#fff;
+    line-height:1.15; text-align:center; word-break:break-all;
+  }
+  .yard-picker-note{ font-size:12.5px; color:var(--muted); margin:14px 0 0; }
+  @media (max-width:520px){ .yard-picker{ flex-direction:column; } .yard-tiers{ flex-direction:row; width:auto; flex-wrap:wrap; } }
 
   /* ---------- Toasts ---------- */
   #toast-root{ position:fixed; top:16px; right:16px; z-index:200; display:flex; flex-direction:column; gap:8px; max-width:calc(100vw - 32px); }
@@ -600,7 +628,7 @@
     backdrop.className = 'modal-backdrop';
     backdrop.addEventListener('click', function(e){ if (e.target === backdrop) closeModal(); });
     const card = document.createElement('div');
-    card.className = 'modal-card';
+    card.className = 'modal-card' + (opts.wide ? ' modal-card--wide' : '');
     card.innerHTML = '<h2 class="modal-title">' + escapeHtml(opts.title) + '</h2><div class="modal-body"></div><div class="modal-actions"></div>';
     card.querySelector('.modal-body').innerHTML = opts.bodyHtml;
     const actions = card.querySelector('.modal-actions');
@@ -850,9 +878,97 @@
     lineInput.value = '';
     arrivalLineConfirmed = '';
     lineDropdown.classList.add('hidden');
+    arrivalYardPlacement = null;
     document.getElementById('arrival-date').value = todayStr();
     document.getElementById('arrival-date').max = todayStr();
     updateArrivalSubmitState();
+  }
+
+  // ---------- Бухта: вибір чарунки зберігання (поки підключено МС; майданчик — наступний крок) ----------
+  let arrivalYardPlacement = null; // {bay,length,width,tier} обраної чарунки, або null якщо пропущено
+  const BAY_LOCATION_MAP = { 'МС': 'MS' };
+
+  function maybeOpenYardPicker(){
+    const bayKey = BAY_LOCATION_MAP[document.getElementById('arrival-location').value];
+    const type = document.getElementById('arrival-type').value;
+    arrivalYardPlacement = null;
+    if (!bayKey || !type) return;
+    openYardPicker(bayKey, type);
+  }
+  document.getElementById('arrival-location').addEventListener('change', maybeOpenYardPicker);
+  document.getElementById('arrival-type').addEventListener('change', maybeOpenYardPicker);
+
+  async function openYardPicker(bayKey, type){
+    setLoading(true);
+    let data;
+    try{ data = await apiCall('getYardState', { bay:bayKey }); }
+    catch(err){ showToast(err.message, 'error'); setLoading(false); return; }
+    finally{ setLoading(false); }
+
+    const cfg = data.config;
+    const span = type === "40'" ? 2 : 1;
+    let selectedTier = 1;
+    let selectedCell = null;
+
+    showModal({
+      title: 'Чарунка зберігання — бухта ' + cfg.label,
+      wide: true,
+      bodyHtml: '<div id="yard-picker-root"></div><p class="yard-picker-note">Оберіть ярус зліва, потім клікніть вільну чарунку. Цей крок необов\'язковий — можна пропустити.</p>',
+      buttons: [
+        { label:'Пропустити', className:'btn btn-ghost', onClick:function(){ arrivalYardPlacement = null; closeModal(); } },
+        { label:'Зберегти', className:'btn btn-primary', onClick:function(){
+            if (!selectedCell){ showToast('Оберіть чарунку або натисніть «Пропустити»', 'error'); return; }
+            arrivalYardPlacement = { bay:bayKey, length:selectedCell.length, width:selectedCell.width, tier:selectedTier };
+            closeModal();
+          }
+        }
+      ]
+    });
+
+    function render(){
+      renderYardGrid(cfg, data.cells, selectedTier, selectedCell, span);
+    }
+    function onTierChange(t){ selectedTier = t; selectedCell = null; render(); }
+    function onCellClick(cell){
+      if (span === 2){
+        if (cell.length + 1 > cfg.length){ showToast("40-футовий тут не влазить — бракує сусідньої чарунки", 'error'); return; }
+        const neighborTaken = data.cells.some(function(c){ return c.tier===selectedTier && c.length===cell.length+1 && c.width===cell.width; });
+        if (neighborTaken){ showToast('Сусідня чарунка вже зайнята', 'error'); return; }
+      }
+      selectedCell = cell;
+      render();
+    }
+
+    function renderYardGrid(cfg, cells, tier, selected, span){
+      const root = document.getElementById('yard-picker-root');
+      if (!root) return;
+      let html = '<div class="yard-picker"><div class="yard-tiers">';
+      for (let t = cfg.height; t >= 1; t--){
+        html += '<button type="button" class="yard-tier-btn' + (t === tier ? ' active' : '') + '" data-tier="' + t + '">Ярус ' + t + '</button>';
+      }
+      html += '</div><div class="yard-grid" style="grid-template-columns:repeat(' + cfg.length + ',1fr);">';
+      for (let w = 1; w <= cfg.width; w++){
+        for (let l = 1; l <= cfg.length; l++){
+          const occ = cells.filter(function(c){ return c.tier === tier && c.length === l && c.width === w; })[0];
+          const isSelected = !!selected && tier === selectedTier && l >= selected.length && l < selected.length + span && w === selected.width;
+          let cls = 'yard-cell ' + (occ ? 'yard-cell--occupied' : (isSelected ? 'yard-cell--selected' : 'yard-cell--empty'));
+          html += '<button type="button" class="' + cls + '" data-length="' + l + '" data-width="' + w + '"' + (occ ? ' disabled' : '') + '>' +
+            (occ ? '<span class="yard-cell-num">' + escapeHtml(formatContainerNumber(occ.number)) + '</span>' : '') +
+          '</button>';
+        }
+      }
+      html += '</div></div>';
+      root.innerHTML = html;
+      root.querySelectorAll('.yard-tier-btn').forEach(function(btn){
+        btn.addEventListener('click', function(){ onTierChange(parseInt(btn.dataset.tier, 10)); });
+      });
+      root.querySelectorAll('.yard-cell:not([disabled])').forEach(function(btn){
+        btn.addEventListener('click', function(){
+          onCellClick({ length:parseInt(btn.dataset.length, 10), width:parseInt(btn.dataset.width, 10) });
+        });
+      });
+    }
+    render();
   }
 
   document.getElementById('arrival-form').addEventListener('submit', async function(e){
@@ -879,6 +995,16 @@
     setLoading(true);
     try{
       await apiCall('addArrival', payload);
+      if (arrivalYardPlacement){
+        try{
+          await apiCall('placeContainer', {
+            bay: arrivalYardPlacement.bay, number: number, type: payload.type,
+            length: arrivalYardPlacement.length, width: arrivalYardPlacement.width, tier: arrivalYardPlacement.tier
+          });
+        } catch(placeErr){
+          showToast('Прихід збережено, але місце в бухті — ні: ' + placeErr.message, 'error');
+        }
+      }
       showToast('Прихід контейнера ' + formatContainerNumber(number) + ' збережено', 'success');
       resetArrivalForm();
       refreshContainers();
@@ -957,12 +1083,24 @@
       if (isDeparted) confirmUndoDeparture(container);
       else openDepartureModal(container);
     });
-    anchor.parentElement.appendChild(menu);
+    document.body.appendChild(menu); // поза таблицею — sticky-колонка й overflow таблиці більше не обрізають меню
+
+    const rect = anchor.getBoundingClientRect();
+    const menuWidth = 170;
+    let left = rect.right - menuWidth;
+    if (left < 8) left = 8;
+    menu.style.position = 'fixed';
+    menu.style.top = (rect.bottom + 4) + 'px';
+    menu.style.left = left + 'px';
+
     setTimeout(function(){
       document.addEventListener('click', function closeOnce(){
         menu.remove();
         document.removeEventListener('click', closeOnce);
       }, { once:true });
+      window.addEventListener('scroll', function closeOnScroll(){
+        menu.remove();
+      }, { once:true, capture:true });
     }, 0);
   }
 
@@ -1113,8 +1251,9 @@
   // Ініціалізація
   // ==========================================================================
   (function init(){
-if (!API_URL || API_URL.indexOf('ВСТАВТЕ_СЮДИ') !== -1){
-  document.getElementById('setup-banner').classList.remove('hidden');
+    const looksLikeRealUrl = /^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(API_URL || '');
+    if (!looksLikeRealUrl){
+      document.getElementById('setup-banner').classList.remove('hidden');
       document.getElementById('screen-login').innerHTML =
         '<div class="login-card"><p style="margin:0;">Застосунок ще не підключено до бекенду.</p>' +
         '<p style="margin:10px 0 0;color:var(--muted);font-size:13.5px;">Дивіться README.md: потрібно вставити URL Apps Script у змінну <code>API_URL</code> на початку index.html.</p></div>';
