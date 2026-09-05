@@ -338,7 +338,7 @@
   .bay-report-cell-step{ font-family:var(--font-mono); font-weight:700; font-size:16px; color:#fff; }
 
   /* ---------- Масштаб перегляду бухти ---------- */
-  .bay-detail-body{ display:flex; gap:10px; align-items:stretch; }
+  .bay-detail-body{ display:flex; gap:10px; align-items:stretch; flex-wrap:wrap; }
   .bay-zoom-slider-wrap{ width:32px; height:auto; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
   .bay-zoom-slider{
     -webkit-appearance:none; appearance:none; width:180px; height:4px;
@@ -382,6 +382,16 @@
     position:fixed; right:12px; bottom:8px; z-index:5; pointer-events:none;
     font-family:Arial,Helvetica,sans-serif; font-size:11.5px; color:#8A8A8A;
   }
+
+  .bay-lifts-panel{
+    flex-shrink:0; width:150px; align-self:flex-start;
+    background:var(--surface); border:1px solid var(--amber-deep); border-radius:var(--radius);
+    padding:16px; text-align:center;
+  }
+  .bay-lifts-label{ font-size:11.5px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); font-weight:600; }
+  .bay-lifts-value{ font-family:var(--font-display); font-weight:700; font-size:34px; color:var(--amber-deep); margin:6px 0; }
+  .bay-lifts-note{ font-size:11.5px; color:var(--muted); }
+  @media (max-width:640px){ .bay-lifts-panel{ width:auto; } }
 
   @media (prefers-reduced-motion:reduce){
     *,*::before,*::after{
@@ -559,7 +569,7 @@
       <h1 class="screen-title">Звіти</h1>
 
       <div class="report-mode-toggle">
-        <button type="button" class="report-mode-btn active" data-mode="stock">Звіт по залишкам</button>
+        <button type="button" class="report-mode-btn active" data-mode="stock">Звіт по залишкам та обороту</button>
         <button type="button" class="report-mode-btn" data-mode="bays">Звіт по бухтам</button>
       </div>
 
@@ -587,7 +597,7 @@
       <p class="stock-summary" id="report-summary"></p>
       <div class="table-wrap">
         <table class="data-table">
-          <thead><tr><th>Номер</th><th>Прихід</th><th>Розхід</th><th>Днів зберігання</th></tr></thead>
+          <thead><tr><th>Номер</th><th>Прихід</th><th>Розхід</th><th>Днів зберігання</th><th>Додаткові ліфти</th></tr></thead>
           <tbody id="report-tbody"></tbody>
         </table>
         <p id="report-empty" class="empty-note hidden">Немає даних за обраний період.</p>
@@ -597,7 +607,7 @@
       <div id="report-mode-bays" class="hidden">
         <div class="stock-toolbar">
           <input id="bay-search" class="search-input" type="text" placeholder="Пошук контейнера (можна частково)…" />
-          <button id="bay-group-btn" class="btn btn-ghost" type="button">Зняти групу контейнерів</button>
+          <button id="bay-group-btn" class="btn btn-ghost" type="button">Зняти контейнер або групу</button>
         </div>
         <div id="bay-overview" class="bay-overview"></div>
         <div id="bay-detail" class="hidden">
@@ -615,6 +625,11 @@
               <div id="bay-zoom-spacer" class="bay-zoom-spacer">
                 <div id="bay-detail-grid" class="bay-zoom-content"></div>
               </div>
+            </div>
+            <div id="bay-lifts-panel" class="bay-lifts-panel hidden">
+              <div class="bay-lifts-label">Додаткові ліфти</div>
+              <div class="bay-lifts-value" id="bay-lifts-value">0</div>
+              <div class="bay-lifts-note">зняти + повернути назад</div>
             </div>
           </div>
         </div>
@@ -1364,26 +1379,29 @@
     document.getElementById('report-export').disabled = lastReportStays.length === 0;
 
     let totalDays = 0;
+    let totalLifts = 0;
     lastReportStays.forEach(function(s){
       totalDays += s.days;
+      if (s.extraLifts) totalLifts += s.extraLifts;
       const tr = document.createElement('tr');
       tr.innerHTML =
         '<td class="mono-cell">' + escapeHtml(formatContainerNumber(s.number)) + '</td>' +
         '<td>' + escapeHtml(s.arrivalDate) + '</td>' +
         '<td>' + (s.departureDate ? escapeHtml(s.departureDate) : '<em>ще на терміналі</em>') + '</td>' +
-        '<td>' + s.days + '</td>';
+        '<td>' + s.days + '</td>' +
+        '<td>' + (s.extraLifts === null || s.extraLifts === undefined ? '—' : s.extraLifts) + '</td>';
       tbody.appendChild(tr);
     });
 
     document.getElementById('report-summary').textContent = lastReportStays.length
-      ? 'Контейнерів у звіті: ' + lastReportStays.length + ' · Середній термін зберігання: ' + (totalDays / lastReportStays.length).toFixed(1) + ' дн.'
+      ? 'Контейнерів у звіті: ' + lastReportStays.length + ' · Середній термін зберігання: ' + (totalDays / lastReportStays.length).toFixed(1) + ' дн. · Додаткових ліфтів разом: ' + totalLifts
       : '';
   }
 
   document.getElementById('report-export').addEventListener('click', function(){
-    const rows = [['Номер', 'Дата приходу', 'Дата розходу', 'Днів зберігання']];
+    const rows = [['Номер', 'Дата приходу', 'Дата розходу', 'Днів зберігання', 'Додаткові ліфти']];
     lastReportStays.forEach(function(s){
-      rows.push([formatContainerNumber(s.number), s.arrivalDate, s.departureDate || 'ще на терміналі', s.days]);
+      rows.push([formatContainerNumber(s.number), s.arrivalDate, s.departureDate || 'ще на терміналі', s.days, s.extraLifts === null || s.extraLifts === undefined ? '' : s.extraLifts]);
     });
     const ws = XLSX.utils.aoa_to_sheet(rows);
     const wb = XLSX.utils.book_new();
@@ -1464,6 +1482,7 @@
       document.getElementById('bay-overview').classList.add('hidden');
       document.getElementById('bay-detail').classList.remove('hidden');
       document.getElementById('bay-route-note').classList.add('hidden');
+      document.getElementById('bay-lifts-panel').classList.add('hidden');
       document.getElementById('bay-route-btn').classList.toggle('hidden', !highlight);
       bayZoomScale = 1;
       document.getElementById('bay-zoom-slider').value = 100;
@@ -1560,30 +1579,53 @@
     if (!target) return;
     bayDetailRoute = computeRemovalRoute(bayDetailCells, target);
     const note = document.getElementById('bay-route-note');
-    note.textContent = bayDetailRoute.length > 1
-      ? 'Маршрут зняття (' + bayDetailRoute.length + ' крок(и)): ' + bayDetailRoute.map(formatContainerNumber).join(' → ')
-      : 'Контейнер зверху — нічого знімати не потрібно, можна забирати одразу.';
+    const liftsPanel = document.getElementById('bay-lifts-panel');
+    if (bayDetailRoute.length > 1){
+      note.textContent = 'Маршрут зняття (' + bayDetailRoute.length + ' крок(и)): ' + bayDetailRoute.map(formatContainerNumber).join(' → ');
+      document.getElementById('bay-lifts-value').textContent = extraLiftsFromRoute(bayDetailRoute);
+      liftsPanel.classList.remove('hidden');
+    } else {
+      note.textContent = 'Контейнер зверху — нічого знімати не потрібно, можна забирати одразу.';
+      liftsPanel.classList.add('hidden');
+    }
     note.classList.remove('hidden');
     renderBayDetailGrid();
   });
 
   // Контейнери, що заважають зняти ціль: той самий width, вищий ярус,
   // перетин по довжині (враховує, що і ціль, і блокуючий можуть бути 40').
+  // Фізика фронтального річстакера (не крана): усе, що СТОЇТЬ ПОПЕРЕДУ цілі
+  // по довжині — на будь-якому ярусі — блокує шлях повністю і має бути
+  // знято й повернуто назад. Плюс стандартне "згори вниз" у власній позиції цілі.
   function computeRemovalRoute(cells, target){
     const targetCells = cells.filter(function(c){ return c.number === target.number; });
     const lengths = targetCells.map(function(c){ return c.length; });
     const lMin = Math.min.apply(null, lengths), lMax = Math.max.apply(null, lengths);
     const width = target.width, tier = target.tier;
 
-    const blockers = {};
+    const blockerKeys = {};
     cells.forEach(function(c){
-      if (c.number === target.number) return;
-      if (c.width !== width || c.tier <= tier) return;
-      if (c.length >= lMin && c.length <= lMax) blockers[c.number] = c.tier;
+      if (c.number === target.number || c.width !== width) return;
+      let blocks = false;
+      if (c.length < lMin) blocks = true;
+      else if (c.tier > tier && c.length >= lMin && c.length <= lMax) blocks = true;
+      if (!blocks) return;
+      if (!blockerKeys[c.number] || c.length < blockerKeys[c.number].length){
+        blockerKeys[c.number] = { length:c.length, tier:c.tier };
+      }
     });
-    const ordered = Object.keys(blockers).sort(function(a, b){ return blockers[b] - blockers[a]; });
+
+    const ordered = Object.keys(blockerKeys).sort(function(a, b){
+      const ka = blockerKeys[a], kb = blockerKeys[b];
+      return ka.length !== kb.length ? ka.length - kb.length : kb.tier - ka.tier;
+    });
     ordered.push(target.number);
     return ordered;
+  }
+
+  // Знято + повернуто назад для кожного сусіднього контейнера (ціль не рахуємо).
+  function extraLiftsFromRoute(route){
+    return (route.length - 1) * 2;
   }
 
   // ==========================================================================
@@ -1604,7 +1646,7 @@
 
   function openGroupCountModal(){
     showModal({
-      title: 'Зняти групу контейнерів',
+      title: 'Зняти контейнер або групу',
       bodyHtml:
         '<label class="field-label" for="group-count-input">Кількість контейнерів, що потрібно зняти</label>' +
         '<input id="group-count-input" type="number" min="1" max="60" value="1" />',
@@ -1716,6 +1758,11 @@
               '<div class="bay-zoom-content group-bay-grid" data-bay="' + bayKey + '">Завантаження…</div>' +
             '</div>' +
           '</div>' +
+          '<div class="bay-lifts-panel">' +
+            '<div class="bay-lifts-label">Додаткові ліфти</div>' +
+            '<div class="bay-lifts-value" data-bay="' + bayKey + '">0</div>' +
+            '<div class="bay-lifts-note">зняти + повернути назад</div>' +
+          '</div>' +
         '</div>' +
       '</div>';
     }).join('');
@@ -1747,6 +1794,9 @@
       });
       renderGroupBayGrid(bayKey, cells, order, targets.map(function(t){ return t.number; }));
       applyGroupZoom(bayKey, 1);
+      const liftsCount = Math.max(0, order.length - targets.length) * 2;
+      const liftsEl = card.querySelector('.bay-lifts-value[data-bay="' + bayKey + '"]');
+      if (liftsEl) liftsEl.textContent = liftsCount;
     });
   }
 
