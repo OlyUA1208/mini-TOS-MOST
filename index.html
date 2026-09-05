@@ -249,11 +249,11 @@
 
   /* ---------- Modal ---------- */
   .modal-backdrop{
-    position:fixed; inset:0; background:rgba(27,36,48,.5); display:flex; align-items:center;
-    justify-content:center; z-index:100; padding:20px;
+    position:fixed; inset:0; background:rgba(27,36,48,.5); display:flex; align-items:flex-start;
+    justify-content:center; z-index:100; padding:20px; overflow-y:auto;
   }
-  .modal-card{ background:var(--surface); border-radius:var(--radius); box-shadow:var(--shadow-md); width:100%; max-width:420px; padding:24px; }
-  .modal-card--wide{ max-width:600px; }
+  .modal-card{ background:var(--surface); border-radius:var(--radius); box-shadow:var(--shadow-md); width:100%; max-width:420px; padding:24px; margin:auto; }
+  .modal-card--wide{ max-width:640px; }
   .modal-title{ font-family:var(--font-display); font-weight:700; font-size:19px; margin:0 0 16px; }
   .modal-plate{ display:flex; align-items:center; gap:10px; margin-bottom:14px; flex-wrap:wrap; }
   .modal-plate-number{ font-family:var(--font-mono); font-weight:700; font-size:17px; letter-spacing:.08em; }
@@ -331,8 +331,9 @@
   }
   .bay-report-cell--filled{ background:var(--steel); }
   .bay-report-cell--found{ border-color:var(--amber); box-shadow:0 0 0 2px var(--amber); }
-  .bay-report-cell--route{ background:var(--go) !important; }
+  .bay-report-cell--route{ background:var(--go) !important; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px; }
   .bay-report-cell--target{ box-shadow:inset 0 0 0 3px var(--amber); }
+  .bay-report-cell-num--under{ font-size:8px; opacity:.9; }
   .bay-report-cell-num{ font-family:var(--font-mono); font-size:clamp(11px,2.2vw,15px); font-weight:700; color:#fff; text-align:center; line-height:1.2; width:100%; }
   .bay-report-cell-step{ font-family:var(--font-mono); font-weight:700; font-size:16px; color:#fff; }
 
@@ -376,6 +377,11 @@
 
   .form-error{ color:var(--stop-deep); font-size:13px; margin:8px 0 0; }
   :focus-visible{ outline:2px solid var(--amber); outline-offset:2px; }
+
+  .site-footer{
+    position:fixed; right:12px; bottom:8px; z-index:5; pointer-events:none;
+    font-family:Arial,Helvetica,sans-serif; font-size:11.5px; color:#8A8A8A;
+  }
 
   @media (prefers-reduced-motion:reduce){
     *,*::before,*::after{
@@ -620,6 +626,7 @@
   <div id="modal-root"></div>
   <div id="toast-root" aria-live="polite"></div>
   <div id="loading-overlay" class="loading-overlay hidden"><div class="spinner"></div></div>
+  <footer class="site-footer">© 2026 mini TOS MOST | Designed &amp; Developed by Olha Chala</footer>
 
 <script>
   // ==========================================================================
@@ -1405,6 +1412,14 @@
   let bayDetailHighlight = null; // {length,width,tier}
   let bayDetailRoute = null;     // впорядкований список номерів — крок за кроком
 
+  let allYardStatesCache = null; // кеш на час перебування на екрані звітів — оновлюється при кожному вході в "Звіт по бухтам"
+
+  async function fetchAllYardStates(){
+    const data = await apiCall('getAllYardStates');
+    allYardStatesCache = data.states;
+    return allYardStatesCache;
+  }
+
   async function loadBayOverview(){
     if (!BAY_CONFIGS) await loadBayConfigs();
     if (!BAY_CONFIGS){ showToast('Не вдалось завантажити список бухт', 'error'); return; }
@@ -1412,11 +1427,12 @@
     const root = document.getElementById('bay-overview');
     root.innerHTML = '';
     try{
-      for (const key of Object.keys(BAY_CONFIGS)){
+      const states = await fetchAllYardStates(); // один виклик замість чотирьох послідовних
+      Object.keys(BAY_CONFIGS).forEach(function(key){
         const cfg = BAY_CONFIGS[key];
-        const data = await apiCall('getYardState', { bay:key });
+        const cells = (states[key] && states[key].cells) || [];
         const total = cfg.length * cfg.width * cfg.height;
-        const occupied = data.cells.length;
+        const occupied = cells.length;
         const pct = total ? Math.round((occupied / total) * 100) : 0;
         const tile = document.createElement('button');
         tile.type = 'button';
@@ -1427,7 +1443,7 @@
           '<div class="bay-tile-bar"><div class="bay-tile-bar-inner" style="width:' + pct + '%;"></div></div>';
         tile.addEventListener('click', function(){ openBayDetail(key, null); });
         root.appendChild(tile);
-      }
+      });
     } catch(err){ showToast(err.message, 'error'); }
     finally{ setLoading(false); }
     document.getElementById('bay-detail').classList.add('hidden');
@@ -1494,7 +1510,8 @@
             const routeIdx = bayDetailRoute ? bayDetailRoute.indexOf(occ.number) : -1;
             if (routeIdx !== -1){
               cls += ' bay-report-cell--route';
-              inner = '<span class="bay-report-cell-step">' + (routeIdx + 1) + '</span>';
+              inner = '<span class="bay-report-cell-step">' + (routeIdx + 1) + '</span>' +
+                '<span class="bay-report-cell-num bay-report-cell-num--under">' + formatContainerNumberCompact(occ.number) + '</span>';
             }
           }
           if (bayDetailHighlight && bayDetailHighlight.tier===t && bayDetailHighlight.length===l && bayDetailHighlight.width===w){
@@ -1520,9 +1537,10 @@
     if (!BAY_CONFIGS) await loadBayConfigs();
     setLoading(true);
     try{
+      const states = await fetchAllYardStates();
       for (const key of Object.keys(BAY_CONFIGS)){
-        const data = await apiCall('getYardState', { bay:key });
-        const match = data.cells.filter(function(c){ return c.number.indexOf(q) !== -1; })[0];
+        const cells = (states[key] && states[key].cells) || [];
+        const match = cells.filter(function(c){ return c.number.indexOf(q) !== -1; })[0];
         if (match){
           setLoading(false);
           await openBayDetail(key, { length:match.length, width:match.width, tier:match.tier });
@@ -1573,11 +1591,12 @@
   // ==========================================================================
   async function loadAllYardCells(){
     if (!BAY_CONFIGS) await loadBayConfigs();
+    const states = await fetchAllYardStates();
     const all = [];
-    for (const key of Object.keys(BAY_CONFIGS)){
-      const data = await apiCall('getYardState', { bay:key });
-      data.cells.forEach(function(c){ all.push({ bay:key, number:c.number, length:c.length, width:c.width, tier:c.tier }); });
-    }
+    Object.keys(BAY_CONFIGS).forEach(function(key){
+      const cells = (states[key] && states[key].cells) || [];
+      cells.forEach(function(c){ all.push({ bay:key, number:c.number, length:c.length, width:c.width, tier:c.tier }); });
+    });
     return all;
   }
 
@@ -1686,31 +1705,58 @@
     });
 
     const blocksHtml = Object.keys(byBay).map(function(bayKey){
-      return '<div class="group-bay-block"><h3>Бухта ' + escapeHtml(BAY_CONFIGS[bayKey].label) + '</h3>' +
-        '<div class="group-bay-grid" data-bay="' + bayKey + '">Завантаження…</div></div>';
+      return '<div class="group-bay-block">' +
+        '<h3>Бухта ' + escapeHtml(BAY_CONFIGS[bayKey].label) + '</h3>' +
+        '<div class="bay-detail-body">' +
+          '<div class="bay-zoom-slider-wrap">' +
+            '<input type="range" class="bay-zoom-slider group-zoom-slider" min="30" max="150" step="5" value="100" data-bay="' + bayKey + '" />' +
+          '</div>' +
+          '<div class="bay-zoom-viewport">' +
+            '<div class="bay-zoom-spacer group-zoom-spacer" data-bay="' + bayKey + '">' +
+              '<div class="bay-zoom-content group-bay-grid" data-bay="' + bayKey + '">Завантаження…</div>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
     }).join('');
 
-    showModal({
+    const card = showModal({
       title: 'Підбір: ' + chosen.length + ' контейнер(и)',
       wide: true,
       bodyHtml: '<div class="group-results-wrap">' + blocksHtml + '</div>',
       buttons: [ { label:'Закрити', className:'btn btn-primary', onClick:closeModal } ]
     });
 
-    Object.keys(byBay).forEach(async function(bayKey){
-      try{
-        const data = await apiCall('getYardState', { bay:bayKey });
-        const targets = byBay[bayKey];
-        const order = [];
-        const seen = {};
-        targets.forEach(function(t){
-          computeRemovalRoute(data.cells, t).forEach(function(num){
-            if (!seen[num]){ seen[num] = true; order.push(num); }
-          });
-        });
-        renderGroupBayGrid(bayKey, data.cells, order, targets.map(function(t){ return t.number; }));
-      } catch(err){ showToast(err.message, 'error'); }
+    card.querySelectorAll('.group-zoom-slider').forEach(function(slider){
+      slider.addEventListener('input', function(){
+        applyGroupZoom(slider.dataset.bay, Number(slider.value) / 100);
+      });
     });
+
+    // Дані вже завантажені одним запитом у loadAllYardCells() — тут просто фільтруємо, без нових звернень до сервера.
+    const states = allYardStatesCache || {};
+    Object.keys(byBay).forEach(function(bayKey){
+      const cells = (states[bayKey] && states[bayKey].cells) || [];
+      const targets = byBay[bayKey];
+      const order = [];
+      const seen = {};
+      targets.forEach(function(t){
+        computeRemovalRoute(cells, t).forEach(function(num){
+          if (!seen[num]){ seen[num] = true; order.push(num); }
+        });
+      });
+      renderGroupBayGrid(bayKey, cells, order, targets.map(function(t){ return t.number; }));
+      applyGroupZoom(bayKey, 1);
+    });
+  }
+
+  function applyGroupZoom(bayKey, scale){
+    const content = document.querySelector('.group-bay-grid[data-bay="' + bayKey + '"]');
+    const spacer = document.querySelector('.group-zoom-spacer[data-bay="' + bayKey + '"]');
+    if (!content || !spacer) return;
+    content.style.transformOrigin = 'top left';
+    content.style.transform = 'scale(' + scale + ')';
+    spacer.style.height = (content.scrollHeight * scale) + 'px';
   }
 
   function renderGroupBayGrid(bayKey, cells, order, targetNumbers){
@@ -1731,7 +1777,11 @@
             inner = '<span class="bay-report-cell-num">' + formatContainerNumberCompact(occ.number) + '</span>';
             if (targetNumbers.indexOf(occ.number) !== -1) cls += ' bay-report-cell--target';
             const idx = order.indexOf(occ.number);
-            if (idx !== -1){ cls += ' bay-report-cell--route'; inner = '<span class="bay-report-cell-step">' + (idx + 1) + '</span>'; }
+            if (idx !== -1){
+              cls += ' bay-report-cell--route';
+              inner = '<span class="bay-report-cell-step">' + (idx + 1) + '</span>' +
+                '<span class="bay-report-cell-num bay-report-cell-num--under">' + formatContainerNumberCompact(occ.number) + '</span>';
+            }
           }
           html += '<div class="' + cls + '">' + inner + '</div>';
         }
