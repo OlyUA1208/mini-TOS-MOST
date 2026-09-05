@@ -275,16 +275,16 @@
   .yard-tier-btn:hover:not(.active){ border-color:var(--steel); color:var(--ink); }
   .yard-grid{ display:grid; gap:6px; flex:1; }
   .yard-cell{
-    aspect-ratio:1; border-radius:4px; border:2px solid var(--line); cursor:pointer;
-    display:flex; align-items:center; justify-content:center; padding:2px; min-width:0;
+    aspect-ratio:0.85; border-radius:4px; border:2px solid var(--line); cursor:pointer;
+    display:flex; align-items:center; justify-content:center; padding:3px; min-width:0;
     background:var(--yard); transition:transform .1s ease,border-color .15s ease,background .15s ease;
   }
   .yard-cell--empty:hover{ border-color:var(--steel); transform:translateY(-1px); }
   .yard-cell--occupied{ background:var(--steel-deep); border-color:var(--steel-deep); cursor:not-allowed; }
   .yard-cell--selected{ background:var(--go); border-color:var(--go); }
   .yard-cell-num{
-    font-family:var(--font-mono); font-size:9px; font-weight:700; color:#fff;
-    line-height:1.15; text-align:center; word-break:break-all;
+    font-family:var(--font-mono); font-size:clamp(11px,2.6vw,15px); font-weight:700; color:#fff;
+    line-height:1.2; text-align:center; width:100%;
   }
   .yard-picker-note{ font-size:12.5px; color:var(--muted); margin:14px 0 0; }
   @media (max-width:520px){ .yard-picker{ flex-direction:column; } .yard-tiers{ flex-direction:row; width:auto; flex-wrap:wrap; } }
@@ -326,14 +326,38 @@
   .bay-report-tier-label{ font-size:11.5px; font-weight:600; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); display:block; margin-bottom:8px; }
   .bay-report-row{ display:grid; gap:6px; }
   .bay-report-cell{
-    aspect-ratio:1; border-radius:4px; border:2px solid transparent; display:flex; align-items:center; justify-content:center;
-    background:var(--yard); padding:2px;
+    aspect-ratio:0.85; border-radius:4px; border:2px solid transparent; display:flex; align-items:center; justify-content:center;
+    background:var(--yard); padding:3px;
   }
   .bay-report-cell--filled{ background:var(--steel); }
   .bay-report-cell--found{ border-color:var(--amber); box-shadow:0 0 0 2px var(--amber); }
   .bay-report-cell--route{ background:var(--go) !important; }
-  .bay-report-cell-num{ font-family:var(--font-mono); font-size:9px; font-weight:700; color:#fff; text-align:center; line-height:1.1; word-break:break-all; }
-  .bay-report-cell-step{ font-family:var(--font-mono); font-weight:700; font-size:13px; color:#fff; }
+  .bay-report-cell--target{ box-shadow:inset 0 0 0 3px var(--amber); }
+  .bay-report-cell-num{ font-family:var(--font-mono); font-size:clamp(11px,2.2vw,15px); font-weight:700; color:#fff; text-align:center; line-height:1.2; width:100%; }
+  .bay-report-cell-step{ font-family:var(--font-mono); font-weight:700; font-size:16px; color:#fff; }
+
+  /* ---------- Масштаб перегляду бухти ---------- */
+  .bay-detail-body{ display:flex; gap:10px; align-items:stretch; }
+  .bay-zoom-slider-wrap{ width:32px; height:auto; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .bay-zoom-slider{
+    -webkit-appearance:none; appearance:none; width:180px; height:4px;
+    background:var(--line); border-radius:2px; outline:none; transform:rotate(-90deg); cursor:pointer;
+  }
+  .bay-zoom-slider::-webkit-slider-thumb{ -webkit-appearance:none; appearance:none; width:18px; height:18px; border-radius:50%; background:var(--steel); cursor:pointer; }
+  .bay-zoom-slider::-moz-range-thumb{ width:18px; height:18px; border-radius:50%; background:var(--steel); cursor:pointer; border:none; }
+  .bay-zoom-viewport{ flex:1; min-width:0; overflow:auto; max-height:68vh; border:1px solid var(--line); border-radius:var(--radius); padding:12px; background:var(--surface); }
+  .bay-zoom-spacer{ position:relative; }
+  .bay-zoom-content{ position:absolute; top:0; left:0; width:100%; }
+
+  /* ---------- Групове зняття ---------- */
+  .group-rows-wrap{ display:flex; flex-direction:column; gap:8px; max-height:50vh; overflow-y:auto; padding-right:4px; }
+  .group-row{ position:relative; }
+  .group-row-input{
+    width:100%; font-family:var(--font-body); font-size:14px; padding:9px 12px;
+    border:1px solid var(--line); border-radius:var(--radius); background:var(--surface); color:var(--ink);
+  }
+  .group-bay-block{ margin-bottom:20px; }
+  .group-bay-block h3{ font-family:var(--font-display); font-size:17px; margin:0 0 10px; }
 
   /* ---------- Toasts ---------- */
   #toast-root{ position:fixed; top:16px; right:16px; z-index:200; display:flex; flex-direction:column; gap:8px; max-width:calc(100vw - 32px); }
@@ -565,7 +589,10 @@
       </div>
 
       <div id="report-mode-bays" class="hidden">
-        <input id="bay-search" class="search-input" type="text" placeholder="Пошук контейнера (можна частково)…" />
+        <div class="stock-toolbar">
+          <input id="bay-search" class="search-input" type="text" placeholder="Пошук контейнера (можна частково)…" />
+          <button id="bay-group-btn" class="btn btn-ghost" type="button">Зняти групу контейнерів</button>
+        </div>
         <div id="bay-overview" class="bay-overview"></div>
         <div id="bay-detail" class="hidden">
           <button class="back-btn" id="bay-detail-back" type="button">← Усі бухти</button>
@@ -574,7 +601,16 @@
             <button id="bay-route-btn" class="btn btn-ghost hidden" type="button">Маршрут зняття</button>
           </div>
           <p id="bay-route-note" class="stock-summary hidden"></p>
-          <div id="bay-detail-grid"></div>
+          <div class="bay-detail-body">
+            <div class="bay-zoom-slider-wrap">
+              <input type="range" id="bay-zoom-slider" class="bay-zoom-slider" min="30" max="150" step="5" value="100" />
+            </div>
+            <div id="bay-zoom-viewport" class="bay-zoom-viewport">
+              <div id="bay-zoom-spacer" class="bay-zoom-spacer">
+                <div id="bay-detail-grid" class="bay-zoom-content"></div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -613,6 +649,10 @@
   function formatContainerNumber(code){
     if (!code || code.length !== 11) return code || '';
     return code.slice(0,4) + ' ' + code.slice(4,10) + '-' + code.slice(10);
+  }
+  function formatContainerNumberCompact(code){
+    if (!code || code.length !== 11) return code || '';
+    return code.slice(0,4) + '<br>' + code.slice(4,10) + '-' + code.slice(10);
   }
   function escapeHtml(s){
     return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){
@@ -1052,7 +1092,7 @@
           const isSelected = !!selected && tier === selectedTier && l >= selected.length && l < selected.length + span && w === selected.width;
           let cls = 'yard-cell ' + (occ ? 'yard-cell--occupied' : (isSelected ? 'yard-cell--selected' : 'yard-cell--empty'));
           html += '<button type="button" class="' + cls + '" data-length="' + l + '" data-width="' + w + '"' + (occ ? ' disabled' : '') + '>' +
-            (occ ? '<span class="yard-cell-num">' + escapeHtml(formatContainerNumber(occ.number)) + '</span>' : '') +
+            (occ ? '<span class="yard-cell-num">' + formatContainerNumberCompact(occ.number) + '</span>' : '') +
           '</button>';
         }
       }
@@ -1394,6 +1434,8 @@
     root.classList.remove('hidden');
   }
 
+  let bayZoomScale = 1;
+
   async function openBayDetail(key, highlight){
     setLoading(true);
     try{
@@ -1407,6 +1449,8 @@
       document.getElementById('bay-detail').classList.remove('hidden');
       document.getElementById('bay-route-note').classList.add('hidden');
       document.getElementById('bay-route-btn').classList.toggle('hidden', !highlight);
+      bayZoomScale = 1;
+      document.getElementById('bay-zoom-slider').value = 100;
       renderBayDetailGrid();
     } catch(err){ showToast(err.message, 'error'); }
     finally{ setLoading(false); }
@@ -1416,6 +1460,21 @@
     document.getElementById('bay-detail').classList.add('hidden');
     document.getElementById('bay-overview').classList.remove('hidden');
   });
+
+  document.getElementById('bay-zoom-slider').addEventListener('input', function(){
+    bayZoomScale = Number(this.value) / 100;
+    applyBayZoom();
+  });
+
+  // Масштабуємо картинку (transform), але висоту/ширину "місця під неї" рахуємо
+  // окремо через спейсер — інакше transform не звільняє зайвий простір скролу.
+  function applyBayZoom(){
+    const content = document.getElementById('bay-detail-grid');
+    const spacer = document.getElementById('bay-zoom-spacer');
+    content.style.transformOrigin = 'top left';
+    content.style.transform = 'scale(' + bayZoomScale + ')';
+    spacer.style.height = (content.scrollHeight * bayZoomScale) + 'px';
+  }
 
   function renderBayDetailGrid(){
     const cfg = BAY_CONFIGS[bayDetailKey];
@@ -1431,7 +1490,7 @@
           let inner = '';
           if (occ){
             cls += ' bay-report-cell--filled';
-            inner = '<span class="bay-report-cell-num">' + escapeHtml(formatContainerNumber(occ.number)) + '</span>';
+            inner = '<span class="bay-report-cell-num">' + formatContainerNumberCompact(occ.number) + '</span>';
             const routeIdx = bayDetailRoute ? bayDetailRoute.indexOf(occ.number) : -1;
             if (routeIdx !== -1){
               cls += ' bay-report-cell--route';
@@ -1448,6 +1507,7 @@
     }
     html += '</div>';
     root.innerHTML = html;
+    applyBayZoom();
   }
 
   document.getElementById('bay-search').addEventListener('keydown', function(e){
@@ -1506,6 +1566,180 @@
     const ordered = Object.keys(blockers).sort(function(a, b){ return blockers[b] - blockers[a]; });
     ordered.push(target.number);
     return ordered;
+  }
+
+  // ==========================================================================
+  // Групове зняття контейнерів
+  // ==========================================================================
+  async function loadAllYardCells(){
+    if (!BAY_CONFIGS) await loadBayConfigs();
+    const all = [];
+    for (const key of Object.keys(BAY_CONFIGS)){
+      const data = await apiCall('getYardState', { bay:key });
+      data.cells.forEach(function(c){ all.push({ bay:key, number:c.number, length:c.length, width:c.width, tier:c.tier }); });
+    }
+    return all;
+  }
+
+  document.getElementById('bay-group-btn').addEventListener('click', openGroupCountModal);
+
+  function openGroupCountModal(){
+    showModal({
+      title: 'Зняти групу контейнерів',
+      bodyHtml:
+        '<label class="field-label" for="group-count-input">Кількість контейнерів, що потрібно зняти</label>' +
+        '<input id="group-count-input" type="number" min="1" max="60" value="1" />',
+      buttons: [
+        { label:'Скасувати', className:'btn btn-ghost', onClick:closeModal },
+        { label:'Далі', className:'btn btn-primary', onClick:function(){
+            const n = parseInt(document.getElementById('group-count-input').value, 10);
+            if (!n || n < 1){ showToast('Вкажіть кількість, більшу за нуль', 'error'); return; }
+            closeModal();
+            openGroupRowsModal(n);
+          }
+        }
+      ]
+    });
+  }
+
+  let groupRowsSelected = [];
+
+  async function openGroupRowsModal(n){
+    setLoading(true);
+    let allCells = [];
+    try{ allCells = await loadAllYardCells(); }
+    catch(err){ showToast(err.message, 'error'); }
+    finally{ setLoading(false); }
+
+    groupRowsSelected = new Array(n).fill(null);
+    let rowsHtml = '';
+    for (let i = 0; i < n; i++){
+      rowsHtml +=
+        '<div class="group-row">' +
+          '<input type="text" class="group-row-input" placeholder="Контейнер ' + (i + 1) + ' — номер чи частина цифр" data-idx="' + i + '" autocomplete="off" />' +
+          '<div class="combo-dropdown hidden"></div>' +
+        '</div>';
+    }
+
+    const card = showModal({
+      title: 'Оберіть контейнери (' + n + ')',
+      wide: true,
+      bodyHtml: '<div class="group-rows-wrap">' + rowsHtml + '</div>',
+      buttons: [
+        { label:'Відмінити', className:'btn btn-ghost', onClick:closeModal },
+        { label:'Почати підбір', className:'btn btn-primary', onClick:function(){
+            const chosen = groupRowsSelected.filter(function(c){ return c; });
+            if (chosen.length === 0){ showToast('Оберіть хоча б один контейнер', 'error'); return; }
+            closeModal();
+            renderGroupPickResults(chosen);
+          }
+        }
+      ]
+    });
+
+    card.querySelectorAll('.group-row').forEach(function(row){
+      const input = row.querySelector('.group-row-input');
+      const dropdown = row.querySelector('.combo-dropdown');
+      const idx = parseInt(input.dataset.idx, 10);
+
+      input.addEventListener('input', function(){
+        groupRowsSelected[idx] = null;
+        const q = input.value.trim().toUpperCase();
+        if (!q){ dropdown.classList.add('hidden'); return; }
+        const seen = {};
+        const matches = allCells.filter(function(c){
+          if (c.number.indexOf(q) === -1) return false;
+          if (seen[c.number]) return false;
+          seen[c.number] = true;
+          return true;
+        });
+        if (matches.length === 0){
+          dropdown.innerHTML = '<div class="combo-empty">Не знайдено серед розміщених у бухтах</div>';
+          dropdown.classList.remove('hidden');
+        } else if (matches.length === 1 && matches[0].number === q){
+          groupRowsSelected[idx] = matches[0];
+          dropdown.classList.add('hidden');
+        } else {
+          dropdown.innerHTML = matches.map(function(c){
+            return '<button type="button" class="combo-option" data-number="' + escapeHtml(c.number) + '">' +
+              escapeHtml(formatContainerNumber(c.number)) + ' — бухта ' + escapeHtml(BAY_CONFIGS[c.bay].label) + '</button>';
+          }).join('');
+          dropdown.classList.remove('hidden');
+        }
+      });
+      dropdown.addEventListener('click', function(e){
+        const btn = e.target.closest('.combo-option');
+        if (!btn) return;
+        const chosen = allCells.find(function(c){ return c.number === btn.dataset.number; });
+        groupRowsSelected[idx] = chosen;
+        input.value = formatContainerNumber(chosen.number);
+        dropdown.classList.add('hidden');
+      });
+    });
+  }
+
+  function renderGroupPickResults(chosen){
+    const byBay = {};
+    chosen.forEach(function(c){
+      if (!byBay[c.bay]) byBay[c.bay] = [];
+      byBay[c.bay].push(c);
+    });
+
+    const blocksHtml = Object.keys(byBay).map(function(bayKey){
+      return '<div class="group-bay-block"><h3>Бухта ' + escapeHtml(BAY_CONFIGS[bayKey].label) + '</h3>' +
+        '<div class="group-bay-grid" data-bay="' + bayKey + '">Завантаження…</div></div>';
+    }).join('');
+
+    showModal({
+      title: 'Підбір: ' + chosen.length + ' контейнер(и)',
+      wide: true,
+      bodyHtml: '<div class="group-results-wrap">' + blocksHtml + '</div>',
+      buttons: [ { label:'Закрити', className:'btn btn-primary', onClick:closeModal } ]
+    });
+
+    Object.keys(byBay).forEach(async function(bayKey){
+      try{
+        const data = await apiCall('getYardState', { bay:bayKey });
+        const targets = byBay[bayKey];
+        const order = [];
+        const seen = {};
+        targets.forEach(function(t){
+          computeRemovalRoute(data.cells, t).forEach(function(num){
+            if (!seen[num]){ seen[num] = true; order.push(num); }
+          });
+        });
+        renderGroupBayGrid(bayKey, data.cells, order, targets.map(function(t){ return t.number; }));
+      } catch(err){ showToast(err.message, 'error'); }
+    });
+  }
+
+  function renderGroupBayGrid(bayKey, cells, order, targetNumbers){
+    const cfg = BAY_CONFIGS[bayKey];
+    const root = document.querySelector('.group-bay-grid[data-bay="' + bayKey + '"]');
+    if (!root) return;
+    let html = '<div class="bay-report-stack">';
+    for (let t = 1; t <= cfg.height; t++){
+      html += '<div class="bay-report-tier"><span class="bay-report-tier-label">Ярус ' + t + '</span>';
+      html += '<div class="bay-report-row" style="grid-template-columns:repeat(' + cfg.length + ',1fr);">';
+      for (let w = 1; w <= cfg.width; w++){
+        for (let l = 1; l <= cfg.length; l++){
+          const occ = cells.filter(function(c){ return c.tier===t && c.length===l && c.width===w; })[0];
+          let cls = 'bay-report-cell';
+          let inner = '';
+          if (occ){
+            cls += ' bay-report-cell--filled';
+            inner = '<span class="bay-report-cell-num">' + formatContainerNumberCompact(occ.number) + '</span>';
+            if (targetNumbers.indexOf(occ.number) !== -1) cls += ' bay-report-cell--target';
+            const idx = order.indexOf(occ.number);
+            if (idx !== -1){ cls += ' bay-report-cell--route'; inner = '<span class="bay-report-cell-step">' + (idx + 1) + '</span>'; }
+          }
+          html += '<div class="' + cls + '">' + inner + '</div>';
+        }
+      }
+      html += '</div></div>';
+    }
+    html += '</div>';
+    root.innerHTML = html;
   }
 
   // ==========================================================================
