@@ -289,6 +289,52 @@
   .yard-picker-note{ font-size:12.5px; color:var(--muted); margin:14px 0 0; }
   @media (max-width:520px){ .yard-picker{ flex-direction:column; } .yard-tiers{ flex-direction:row; width:auto; flex-wrap:wrap; } }
 
+  .bay-choice-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(90px,1fr)); gap:10px; }
+  .bay-choice-btn{
+    background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+    padding:18px 10px; font-family:var(--font-display); font-weight:700; font-size:20px;
+    color:var(--steel-deep); cursor:pointer; transition:border-color .15s,transform .1s;
+  }
+  .bay-choice-btn:hover{ border-color:var(--steel); transform:translateY(-1px); }
+
+  /* ---------- Звіт по бухтам ---------- */
+  .report-mode-toggle{ display:flex; gap:8px; margin-bottom:20px; flex-wrap:wrap; }
+  .report-mode-btn{
+    background:var(--surface); border:1px solid var(--line); border-radius:999px;
+    padding:8px 16px; font-family:var(--font-body); font-weight:600; font-size:13.5px;
+    color:var(--muted); cursor:pointer; transition:background .15s,color .15s,border-color .15s;
+  }
+  .report-mode-btn.active{ background:var(--steel-deep); border-color:var(--steel-deep); color:#fff; }
+  .report-mode-btn:hover:not(.active){ border-color:var(--steel); color:var(--ink); }
+
+  .bay-overview{ display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:14px; }
+  .bay-tile{
+    background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+    padding:20px; cursor:pointer; text-align:left; box-shadow:var(--shadow-sm);
+    transition:transform .12s ease,box-shadow .15s ease,border-color .15s ease;
+  }
+  .bay-tile:hover{ transform:translateY(-2px); box-shadow:var(--shadow-md); border-color:var(--steel); }
+  .bay-tile-label{ font-family:var(--font-display); font-weight:700; font-size:22px; color:var(--steel-deep); }
+  .bay-tile-fill{ font-size:12.5px; color:var(--muted); margin-top:6px; }
+  .bay-tile-bar{ height:6px; border-radius:3px; background:var(--line); margin-top:10px; overflow:hidden; }
+  .bay-tile-bar-inner{ height:100%; background:var(--steel); }
+
+  .bay-detail-header{ display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:6px; }
+  .bay-detail-title{ font-family:var(--font-display); font-weight:700; font-size:22px; margin:0; }
+  .bay-report-stack{ display:flex; flex-direction:column-reverse; gap:14px; }
+  .bay-report-tier{ background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); padding:12px; }
+  .bay-report-tier-label{ font-size:11.5px; font-weight:600; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); display:block; margin-bottom:8px; }
+  .bay-report-row{ display:grid; gap:6px; }
+  .bay-report-cell{
+    aspect-ratio:1; border-radius:4px; border:2px solid transparent; display:flex; align-items:center; justify-content:center;
+    background:var(--yard); padding:2px;
+  }
+  .bay-report-cell--filled{ background:var(--steel); }
+  .bay-report-cell--found{ border-color:var(--amber); box-shadow:0 0 0 2px var(--amber); }
+  .bay-report-cell--route{ background:var(--go) !important; }
+  .bay-report-cell-num{ font-family:var(--font-mono); font-size:9px; font-weight:700; color:#fff; text-align:center; line-height:1.1; word-break:break-all; }
+  .bay-report-cell-step{ font-family:var(--font-mono); font-weight:700; font-size:13px; color:#fff; }
+
   /* ---------- Toasts ---------- */
   #toast-root{ position:fixed; top:16px; right:16px; z-index:200; display:flex; flex-direction:column; gap:8px; max-width:calc(100vw - 32px); }
   .toast{
@@ -481,6 +527,13 @@
     <section id="screen-reports" class="screen hidden">
       <button class="back-btn" data-nav="menu">← Меню</button>
       <h1 class="screen-title">Звіти</h1>
+
+      <div class="report-mode-toggle">
+        <button type="button" class="report-mode-btn active" data-mode="stock">Звіт по залишкам</button>
+        <button type="button" class="report-mode-btn" data-mode="bays">Звіт по бухтам</button>
+      </div>
+
+      <div id="report-mode-stock">
       <div class="form-card" style="margin-bottom:20px;">
         <div class="form-grid">
           <div class="field">
@@ -508,6 +561,21 @@
           <tbody id="report-tbody"></tbody>
         </table>
         <p id="report-empty" class="empty-note hidden">Немає даних за обраний період.</p>
+      </div>
+      </div>
+
+      <div id="report-mode-bays" class="hidden">
+        <input id="bay-search" class="search-input" type="text" placeholder="Пошук контейнера (можна частково)…" />
+        <div id="bay-overview" class="bay-overview"></div>
+        <div id="bay-detail" class="hidden">
+          <button class="back-btn" id="bay-detail-back" type="button">← Усі бухти</button>
+          <div class="bay-detail-header">
+            <h2 class="bay-detail-title" id="bay-detail-title"></h2>
+            <button id="bay-route-btn" class="btn btn-ghost hidden" type="button">Маршрут зняття</button>
+          </div>
+          <p id="bay-route-note" class="stock-summary hidden"></p>
+          <div id="bay-detail-grid"></div>
+        </div>
       </div>
     </section>
 
@@ -884,19 +952,50 @@
     updateArrivalSubmitState();
   }
 
-  // ---------- Бухта: вибір чарунки зберігання (поки підключено МС; майданчик — наступний крок) ----------
+  // ---------- Бухта: конфігурація (спільна для Приходу й Звіту по бухтам) ----------
+  let BAY_CONFIGS = null; // { MS:{key,label,length,width,height}, A:{...}, B:{...}, V:{...} }
+
+  async function loadBayConfigs(){
+    try{
+      const data = await apiCall('getBayConfigs');
+      BAY_CONFIGS = data.bays;
+    } catch(err){ BAY_CONFIGS = null; }
+  }
+
+  // ---------- Бухта: вибір чарунки зберігання при Приході ----------
   let arrivalYardPlacement = null; // {bay,length,width,tier} обраної чарунки, або null якщо пропущено
-  const BAY_LOCATION_MAP = { 'МС': 'MS' };
 
   function maybeOpenYardPicker(){
-    const bayKey = BAY_LOCATION_MAP[document.getElementById('arrival-location').value];
+    const loc = document.getElementById('arrival-location').value;
     const type = document.getElementById('arrival-type').value;
     arrivalYardPlacement = null;
-    if (!bayKey || !type) return;
-    openYardPicker(bayKey, type);
+    if (!type || !BAY_CONFIGS) return;
+    if (loc === 'МС' && BAY_CONFIGS.MS){ openYardPicker('MS', type); }
+    else if (loc === 'майданчик'){ openBaySelector(type); }
   }
   document.getElementById('arrival-location').addEventListener('change', maybeOpenYardPicker);
   document.getElementById('arrival-type').addEventListener('change', maybeOpenYardPicker);
+
+  function openBaySelector(type){
+    const bayKeys = Object.keys(BAY_CONFIGS).filter(function(k){ return k !== 'MS'; });
+    if (bayKeys.length === 0){ return; }
+    const buttonsHtml = bayKeys.map(function(k){
+      return '<button type="button" class="bay-choice-btn" data-bay="' + k + '">' + escapeHtml(BAY_CONFIGS[k].label) + '</button>';
+    }).join('');
+    const card = showModal({
+      title: 'Оберіть бухту майданчика',
+      bodyHtml: '<div class="bay-choice-grid">' + buttonsHtml + '</div>',
+      buttons: [
+        { label:'Пропустити', className:'btn btn-ghost', onClick:function(){ arrivalYardPlacement = null; closeModal(); } }
+      ]
+    });
+    card.querySelectorAll('.bay-choice-btn').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        closeModal();
+        openYardPicker(btn.dataset.bay, type);
+      });
+    });
+  }
 
   async function openYardPicker(bayKey, type){
     setLoading(true);
@@ -1248,6 +1347,168 @@
   });
 
   // ==========================================================================
+  // Звіт по бухтам
+  // ==========================================================================
+  document.querySelectorAll('.report-mode-btn').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      document.querySelectorAll('.report-mode-btn').forEach(function(b){ b.classList.remove('active'); });
+      btn.classList.add('active');
+      const mode = btn.dataset.mode;
+      document.getElementById('report-mode-stock').classList.toggle('hidden', mode !== 'stock');
+      document.getElementById('report-mode-bays').classList.toggle('hidden', mode !== 'bays');
+      if (mode === 'bays') loadBayOverview();
+    });
+  });
+
+  let bayDetailKey = null;
+  let bayDetailCells = [];
+  let bayDetailHighlight = null; // {length,width,tier}
+  let bayDetailRoute = null;     // впорядкований список номерів — крок за кроком
+
+  async function loadBayOverview(){
+    if (!BAY_CONFIGS) await loadBayConfigs();
+    if (!BAY_CONFIGS){ showToast('Не вдалось завантажити список бухт', 'error'); return; }
+    setLoading(true);
+    const root = document.getElementById('bay-overview');
+    root.innerHTML = '';
+    try{
+      for (const key of Object.keys(BAY_CONFIGS)){
+        const cfg = BAY_CONFIGS[key];
+        const data = await apiCall('getYardState', { bay:key });
+        const total = cfg.length * cfg.width * cfg.height;
+        const occupied = data.cells.length;
+        const pct = total ? Math.round((occupied / total) * 100) : 0;
+        const tile = document.createElement('button');
+        tile.type = 'button';
+        tile.className = 'bay-tile';
+        tile.innerHTML =
+          '<div class="bay-tile-label">' + escapeHtml(cfg.label) + '</div>' +
+          '<div class="bay-tile-fill">' + occupied + ' / ' + total + ' TEU · ' + pct + '%</div>' +
+          '<div class="bay-tile-bar"><div class="bay-tile-bar-inner" style="width:' + pct + '%;"></div></div>';
+        tile.addEventListener('click', function(){ openBayDetail(key, null); });
+        root.appendChild(tile);
+      }
+    } catch(err){ showToast(err.message, 'error'); }
+    finally{ setLoading(false); }
+    document.getElementById('bay-detail').classList.add('hidden');
+    root.classList.remove('hidden');
+  }
+
+  async function openBayDetail(key, highlight){
+    setLoading(true);
+    try{
+      const data = await apiCall('getYardState', { bay:key });
+      bayDetailKey = key;
+      bayDetailCells = data.cells;
+      bayDetailHighlight = highlight;
+      bayDetailRoute = null;
+      document.getElementById('bay-detail-title').textContent = 'Бухта ' + BAY_CONFIGS[key].label;
+      document.getElementById('bay-overview').classList.add('hidden');
+      document.getElementById('bay-detail').classList.remove('hidden');
+      document.getElementById('bay-route-note').classList.add('hidden');
+      document.getElementById('bay-route-btn').classList.toggle('hidden', !highlight);
+      renderBayDetailGrid();
+    } catch(err){ showToast(err.message, 'error'); }
+    finally{ setLoading(false); }
+  }
+
+  document.getElementById('bay-detail-back').addEventListener('click', function(){
+    document.getElementById('bay-detail').classList.add('hidden');
+    document.getElementById('bay-overview').classList.remove('hidden');
+  });
+
+  function renderBayDetailGrid(){
+    const cfg = BAY_CONFIGS[bayDetailKey];
+    const root = document.getElementById('bay-detail-grid');
+    let html = '<div class="bay-report-stack">';
+    for (let t = 1; t <= cfg.height; t++){
+      html += '<div class="bay-report-tier"><span class="bay-report-tier-label">Ярус ' + t + '</span>';
+      html += '<div class="bay-report-row" style="grid-template-columns:repeat(' + cfg.length + ',1fr);">';
+      for (let w = 1; w <= cfg.width; w++){
+        for (let l = 1; l <= cfg.length; l++){
+          const occ = bayDetailCells.filter(function(c){ return c.tier===t && c.length===l && c.width===w; })[0];
+          let cls = 'bay-report-cell';
+          let inner = '';
+          if (occ){
+            cls += ' bay-report-cell--filled';
+            inner = '<span class="bay-report-cell-num">' + escapeHtml(formatContainerNumber(occ.number)) + '</span>';
+            const routeIdx = bayDetailRoute ? bayDetailRoute.indexOf(occ.number) : -1;
+            if (routeIdx !== -1){
+              cls += ' bay-report-cell--route';
+              inner = '<span class="bay-report-cell-step">' + (routeIdx + 1) + '</span>';
+            }
+          }
+          if (bayDetailHighlight && bayDetailHighlight.tier===t && bayDetailHighlight.length===l && bayDetailHighlight.width===w){
+            cls += ' bay-report-cell--found';
+          }
+          html += '<div class="' + cls + '">' + inner + '</div>';
+        }
+      }
+      html += '</div></div>';
+    }
+    html += '</div>';
+    root.innerHTML = html;
+  }
+
+  document.getElementById('bay-search').addEventListener('keydown', function(e){
+    if (e.key === 'Enter') runBaySearch(this.value);
+  });
+
+  async function runBaySearch(query){
+    const q = query.trim().toUpperCase();
+    if (!q) return;
+    if (!BAY_CONFIGS) await loadBayConfigs();
+    setLoading(true);
+    try{
+      for (const key of Object.keys(BAY_CONFIGS)){
+        const data = await apiCall('getYardState', { bay:key });
+        const match = data.cells.filter(function(c){ return c.number.indexOf(q) !== -1; })[0];
+        if (match){
+          setLoading(false);
+          await openBayDetail(key, { length:match.length, width:match.width, tier:match.tier });
+          return;
+        }
+      }
+      showToast('Контейнер не знайдено в жодній бухті (можливо, ще не розміщений)', 'error');
+    } catch(err){ showToast(err.message, 'error'); }
+    finally{ setLoading(false); }
+  }
+
+  document.getElementById('bay-route-btn').addEventListener('click', function(){
+    if (!bayDetailHighlight) return;
+    const target = bayDetailCells.filter(function(c){
+      return c.tier===bayDetailHighlight.tier && c.length===bayDetailHighlight.length && c.width===bayDetailHighlight.width;
+    })[0];
+    if (!target) return;
+    bayDetailRoute = computeRemovalRoute(bayDetailCells, target);
+    const note = document.getElementById('bay-route-note');
+    note.textContent = bayDetailRoute.length > 1
+      ? 'Маршрут зняття (' + bayDetailRoute.length + ' крок(и)): ' + bayDetailRoute.map(formatContainerNumber).join(' → ')
+      : 'Контейнер зверху — нічого знімати не потрібно, можна забирати одразу.';
+    note.classList.remove('hidden');
+    renderBayDetailGrid();
+  });
+
+  // Контейнери, що заважають зняти ціль: той самий width, вищий ярус,
+  // перетин по довжині (враховує, що і ціль, і блокуючий можуть бути 40').
+  function computeRemovalRoute(cells, target){
+    const targetCells = cells.filter(function(c){ return c.number === target.number; });
+    const lengths = targetCells.map(function(c){ return c.length; });
+    const lMin = Math.min.apply(null, lengths), lMax = Math.max.apply(null, lengths);
+    const width = target.width, tier = target.tier;
+
+    const blockers = {};
+    cells.forEach(function(c){
+      if (c.number === target.number) return;
+      if (c.width !== width || c.tier <= tier) return;
+      if (c.length >= lMin && c.length <= lMax) blockers[c.number] = c.tier;
+    });
+    const ordered = Object.keys(blockers).sort(function(a, b){ return blockers[b] - blockers[a]; });
+    ordered.push(target.number);
+    return ordered;
+  }
+
+  // ==========================================================================
   // Ініціалізація
   // ==========================================================================
   (function init(){
@@ -1261,6 +1522,7 @@
     }
     document.getElementById('arrival-date').max = todayStr();
     loadLineCodes();
+    loadBayConfigs();
     initLogin();
   })();
 </script>
