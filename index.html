@@ -1015,19 +1015,51 @@
     }
   }
 
+  // Позиції 1–4 номера контейнера ЗАВЖДИ літери, 5–11 ЗАВЖДИ цифри (стандарт
+  // ISO 6346). Це дає змогу виправляти типові плутанини розпізнавання за
+  // відомою формою — той самий принцип, що й у системах розпізнавання
+  // номерних знаків (ANPR): відомий формат виправляє неоднозначні символи.
+  const DIGIT_TO_LETTER = { '0':'O', '1':'I', '2':'Z', '4':'A', '5':'S', '6':'G', '8':'B' };
+  const LETTER_TO_DIGIT = { 'O':'0', 'D':'0', 'Q':'0', 'I':'1', 'L':'1', 'Z':'2', 'A':'4', 'S':'5', 'G':'6', 'B':'8' };
+
+  function correctToExpectedShape(raw){
+    let out = '';
+    for (let i = 0; i < 11; i++){
+      const ch = raw[i];
+      const expectLetter = i < 4;
+      if (expectLetter){
+        if (/[A-Z]/.test(ch)) out += ch;
+        else if (DIGIT_TO_LETTER[ch]) out += DIGIT_TO_LETTER[ch];
+        else return null;
+      } else {
+        if (/[0-9]/.test(ch)) out += ch;
+        else if (LETTER_TO_DIGIT[ch]) out += LETTER_TO_DIGIT[ch];
+        else return null;
+      }
+    }
+    return out;
+  }
+
   // Шукає в розпізнаному (і часто зашумленому) тексті відрізок з 11 символів.
+  // Для кожного відрізка спершу пробуємо "виправлену під форму" версію
+  // (плутанина I/1, O/0 тощо виправлена за позицією), потім сирий варіант.
   // Спочатку — повна перевірка ISO 6346 разом із контрольною цифрою (майже
   // неможливо збігтись випадково). Якщо такого немає — запам'ятовуємо перший
-  // відрізок правильної ФОРМИ (4 літери + 7 цифр) як варіант для перевірки,
-  // а не мовчки вставляємо щось непідтверджене.
+  // відрізок правильної форми як варіант для перевірки, а не мовчки
+  // вставляємо щось непідтверджене.
   function extractContainerNumberFromText(rawText){
     const cleaned = (rawText || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
     let shapeMatch = null;
     for (let i = 0; i + 11 <= cleaned.length; i++){
-      const candidate = cleaned.slice(i, i + 11);
-      const v = validateIso6346(candidate);
-      if (v.state === 'valid') return { number:candidate, confident:true };
-      if (v.state === 'checkdigit' && !shapeMatch) shapeMatch = candidate;
+      const raw = cleaned.slice(i, i + 11);
+      const corrected = correctToExpectedShape(raw);
+      const candidates = corrected && corrected !== raw ? [corrected, raw] : [raw];
+      for (let c = 0; c < candidates.length; c++){
+        const candidate = candidates[c];
+        const v = validateIso6346(candidate);
+        if (v.state === 'valid') return { number:candidate, confident:true };
+        if (v.state === 'checkdigit' && !shapeMatch) shapeMatch = candidate;
+      }
     }
     return shapeMatch ? { number:shapeMatch, confident:false } : null;
   }
@@ -1048,12 +1080,37 @@
   let cameraAutoLoopActive = false;
   let cameraAttemptCount = 0;
   let cameraWorker = null;
+  let cameraPositionVotes = null; // масив {символ: кількість} по кожній з 11 позицій — консенсус із кількох спроб
+
+  function recordVotes(str){
+    if (!cameraPositionVotes) cameraPositionVotes = new Array(11).fill(null).map(function(){ return {}; });
+    for (let i = 0; i < 11; i++){
+      const ch = str[i];
+      cameraPositionVotes[i][ch] = (cameraPositionVotes[i][ch] || 0) + 1;
+    }
+  }
+
+  function buildConsensusCandidate(){
+    if (!cameraPositionVotes) return null;
+    let out = '';
+    for (let i = 0; i < 11; i++){
+      const votes = cameraPositionVotes[i];
+      let bestCh = null, bestCount = 0;
+      Object.keys(votes).forEach(function(ch){
+        if (votes[ch] > bestCount){ bestCount = votes[ch]; bestCh = ch; }
+      });
+      if (!bestCh) return null;
+      out += bestCh;
+    }
+    return out;
+  }
 
   document.getElementById('camera-btn').addEventListener('click', openCameraCapture);
 
   async function openCameraCapture(){
     cameraAutoLoopActive = false;
     cameraAttemptCount = 0;
+    cameraPositionVotes = null;
     const card = showModal({
       title: 'Сфотографувати номер контейнера',
       wide: true,
@@ -1110,18 +1167,34 @@
     while (cameraAutoLoopActive){
       const found = await attemptOneRecognition();
       if (!cameraAutoLoopActive) break; // модалку вже закрили, поки йшло розпізнавання
-      if (found){
-        arrivalNumberInput.value = found.number;
+
+      let accept = null;
+      if (found && found.confident){
+        accept = found;
+      } else if (found){
+        // не ідеальний результат цієї спроби — додаємо його голос по кожній
+        // позиції; якщо консенсус кількох спроб збігається і сходиться —
+        // приймаємо його, навіть якщо жодна окрема спроба не була ідеальною.
+        recordVotes(found.number);
+        const consensus = buildConsensusCandidate();
+        if (consensus && validateIso6346(consensus).state === 'valid'){
+          accept = { number:consensus, confident:true };
+        }
+      }
+
+      if (accept){
+        arrivalNumberInput.value = accept.number;
         arrivalNumberInput.dispatchEvent(new Event('input'));
         cameraAutoLoopActive = false;
         showToast(
-          found.confident
-            ? 'Номер розпізнано: ' + formatContainerNumber(found.number)
-            : 'Схоже на ' + formatContainerNumber(found.number) + ' — перевірте, контрольна цифра не збіглася',
-          found.confident ? 'success' : 'error'
+          accept.confident
+            ? 'Номер розпізнано: ' + formatContainerNumber(accept.number)
+            : 'Схоже на ' + formatContainerNumber(accept.number) + ' — перевірте, контрольна цифра не збіглася',
+          accept.confident ? 'success' : 'error'
         );
         break;
       }
+
       cameraAttemptCount++;
       if (statusEl) statusEl.textContent = 'Шукаю номер… (спроба ' + cameraAttemptCount + ') — тримайте камеру рівно й нерухомо.';
       await new Promise(function(resolve){ setTimeout(resolve, 300); });
