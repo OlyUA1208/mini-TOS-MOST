@@ -1015,11 +1015,6 @@
     }
   }
 
-  // Рамка-підказка: частка від розміру відео, яку кадруємо перед розпізнаванням.
-  // Widescreen-пропорція навмисно — головний номер контейнера завжди набагато
-  // ширший, ніж високий, і зазвичай найбільший напис на дверях.
-  const CAMERA_GUIDE = { left:0.06, top:0.40, width:0.88, height:0.20 };
-
   // Шукає в розпізнаному (і часто зашумленому) тексті відрізок з 11 символів.
   // Спочатку — повна перевірка ISO 6346 разом із контрольною цифрою (майже
   // неможливо збігтись випадково). Якщо такого немає — запам'ятовуємо перший
@@ -1037,23 +1032,28 @@
     return shapeMatch ? { number:shapeMatch, confident:false } : null;
   }
 
-  // Градації сірого + підвищення контрасту — без жорсткої бінаризації (щоб не
-  // губити символи при нерівному освітленні на реальному фото контейнера).
-  function preprocessCanvasForOcr(canvas){
-    const ctx = canvas.getContext('2d');
-    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const d = imgData.data;
-    for (let i = 0; i < d.length; i += 4){
-      const gray = 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2];
+  // Градації сірого + контраст; invert=true — для світлого напису на темному
+  // контейнері (найчастіший випадок), invert=false — для темного напису на
+  // світлому. Офіційна документація Tesseract 4+ прямо каже: рушій впевнено
+  // читає лише темний текст на світлому тлі, тому обидва варіанти пробуємо окремо.
+  function applyGrayscaleContrast(data, invert){
+    for (let i = 0; i < data.length; i += 4){
+      let gray = 0.299*data[i] + 0.587*data[i+1] + 0.114*data[i+2];
+      if (invert) gray = 255 - gray;
       const contrasted = Math.min(255, Math.max(0, (gray - 128) * 1.6 + 128));
-      d[i] = d[i+1] = d[i+2] = contrasted;
+      data[i] = data[i+1] = data[i+2] = contrasted;
     }
-    ctx.putImageData(imgData, 0, 0);
   }
+
+  let cameraAutoLoopActive = false;
+  let cameraAttemptCount = 0;
+  let cameraWorker = null;
 
   document.getElementById('camera-btn').addEventListener('click', openCameraCapture);
 
   async function openCameraCapture(){
+    cameraAutoLoopActive = false;
+    cameraAttemptCount = 0;
     const card = showModal({
       title: 'Сфотографувати номер контейнера',
       wide: true,
@@ -1063,10 +1063,15 @@
           '<div class="camera-guide"></div>' +
           '<canvas id="camera-canvas"></canvas>' +
         '</div>' +
-        '<p id="camera-status" class="plate-hint" style="color:var(--muted);margin-top:10px;">Увімкнення камери…</p>',
+        '<p id="camera-status" class="plate-hint" style="color:var(--muted);margin-top:10px;">Увімкнення камери…</p>' +
+        '<p id="camera-debug" class="plate-hint" style="color:var(--muted);font-family:var(--font-mono);font-size:11px;"></p>',
       buttons: [
-        { label:'Скасувати', className:'btn btn-ghost', onClick:function(){ stopCameraStream(); closeModal(); } },
-        { label:'Зняти фото', className:'btn btn-primary', onClick:function(){ captureAndRecognize(); } }
+        { label:'Скасувати', className:'btn btn-ghost', onClick:function(){
+            cameraAutoLoopActive = false;
+            stopCameraStream();
+            closeModal();
+          }
+        }
       ]
     });
 
@@ -1075,70 +1080,106 @@
       activeCameraStream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment' } });
       const video = card.querySelector('#camera-video');
       video.srcObject = activeCameraStream;
-      statusEl.textContent = 'Впишіть ГОЛОВНИЙ номер (найбільший напис на дверях) у рамку — не менший код під ним. Спроб — скільки завгодно.';
+      statusEl.textContent = 'Впишіть ГОЛОВНИЙ номер (найбільший напис на дверях, не менший код під ним) у рамку і тримайте рівно.';
+      await new Promise(function(resolve){ setTimeout(resolve, 900); }); // даємо камері зфокусуватись
+      runCameraAutoLoop();
     } catch(err){
       statusEl.textContent = "Не вдалося увімкнути камеру (" + err.message + "). Номер завжди можна ввести вручну.";
     }
   }
 
-  async function captureAndRecognize(){
-    const video = document.getElementById('camera-video');
+  async function runCameraAutoLoop(){
+    cameraAutoLoopActive = true;
     const statusEl = document.getElementById('camera-status');
-    const canvas = document.getElementById('camera-canvas');
-    if (!video || !video.videoWidth){
-      if (statusEl) statusEl.textContent = 'Камера ще не готова — зачекайте секунду і спробуйте ще раз.';
+    try{
+      await ensureTesseractLoaded();
+      if (!window.Tesseract || typeof Tesseract.createWorker !== 'function'){
+        if (statusEl) statusEl.textContent = 'Не вдалось ініціалізувати розпізнавання. Введіть номер вручну.';
+        return;
+      }
+      cameraWorker = await Tesseract.createWorker('eng');
+      await cameraWorker.setParameters({
+        tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
+        tessedit_pageseg_mode: '6'
+      });
+    } catch(err){
+      if (statusEl) statusEl.textContent = 'Помилка запуску розпізнавання: ' + err.message;
       return;
     }
 
-    // Кадруємо лише область рамки-підказки й трохи збільшуємо — маленький,
-    // чіткий фрагмент з самим номером розпізнається значно надійніше, ніж
-    // весь контейнер одразу.
-    const sx = Math.round(video.videoWidth * CAMERA_GUIDE.left);
-    const sy = Math.round(video.videoHeight * CAMERA_GUIDE.top);
-    const sw = Math.round(video.videoWidth * CAMERA_GUIDE.width);
-    const sh = Math.round(video.videoHeight * CAMERA_GUIDE.height);
-    const scale = 2;
+    while (cameraAutoLoopActive){
+      const found = await attemptOneRecognition();
+      if (!cameraAutoLoopActive) break; // модалку вже закрили, поки йшло розпізнавання
+      if (found){
+        arrivalNumberInput.value = found.number;
+        arrivalNumberInput.dispatchEvent(new Event('input'));
+        cameraAutoLoopActive = false;
+        showToast(
+          found.confident
+            ? 'Номер розпізнано: ' + formatContainerNumber(found.number)
+            : 'Схоже на ' + formatContainerNumber(found.number) + ' — перевірте, контрольна цифра не збіглася',
+          found.confident ? 'success' : 'error'
+        );
+        break;
+      }
+      cameraAttemptCount++;
+      if (statusEl) statusEl.textContent = 'Шукаю номер… (спроба ' + cameraAttemptCount + ') — тримайте камеру рівно й нерухомо.';
+      await new Promise(function(resolve){ setTimeout(resolve, 300); });
+    }
+
+    if (cameraWorker){ try{ await cameraWorker.terminate(); } catch(e){} cameraWorker = null; }
+    stopCameraStream();
+    closeModal();
+  }
+
+  async function attemptOneRecognition(){
+    const video = document.getElementById('camera-video');
+    const guide = document.querySelector('.camera-guide');
+    const canvas = document.getElementById('camera-canvas');
+    const debugEl = document.getElementById('camera-debug');
+    if (!video || !video.videoWidth || !guide || !cameraWorker) return null;
+
+    // Кадруємо за РЕАЛЬНО відображеним положенням рамки відносно відео
+    // (виміряним на екрані), а не за припущеннями про орієнтацію потоку —
+    // так коректно, навіть якщо браузер сам повертає/масштабує камеру.
+    const videoRect = video.getBoundingClientRect();
+    const guideRect = guide.getBoundingClientRect();
+    if (videoRect.width === 0 || videoRect.height === 0) return null;
+
+    const relLeft = (guideRect.left - videoRect.left) / videoRect.width;
+    const relTop = (guideRect.top - videoRect.top) / videoRect.height;
+    const relWidth = guideRect.width / videoRect.width;
+    const relHeight = guideRect.height / videoRect.height;
+
+    const sx = Math.max(0, Math.round(video.videoWidth * relLeft));
+    const sy = Math.max(0, Math.round(video.videoHeight * relTop));
+    const sw = Math.max(1, Math.round(video.videoWidth * relWidth));
+    const sh = Math.max(1, Math.round(video.videoHeight * relHeight));
+    const scale = 3;
+
     canvas.width = sw * scale;
     canvas.height = sh * scale;
     const ctx = canvas.getContext('2d');
     ctx.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
-    preprocessCanvasForOcr(canvas);
+    const original = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
-    statusEl.textContent = 'Завантажую розпізнавання…';
-    setLoading(true);
-    try{
-      await ensureTesseractLoaded();
-      if (!window.Tesseract || typeof Tesseract.createWorker !== 'function'){
-        throw new Error('Бібліотеку розпізнавання не вдалось ініціалізувати');
-      }
-      statusEl.textContent = 'Розпізнаю номер…';
-      const worker = await Tesseract.createWorker('eng');
-      await worker.setParameters({
-        tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
-        tessedit_pageseg_mode: '7' // один рядок тексту — саме те, що в кадрованій рамці
-      });
-      const result = await worker.recognize(canvas);
-      await worker.terminate();
-
-      const found = extractContainerNumberFromText(result.data.text);
-      if (found && found.confident){
-        arrivalNumberInput.value = found.number;
-        arrivalNumberInput.dispatchEvent(new Event('input'));
-        showToast('Номер розпізнано: ' + formatContainerNumber(found.number), 'success');
-        stopCameraStream();
-        closeModal();
-      } else if (found){
-        arrivalNumberInput.value = found.number;
-        arrivalNumberInput.dispatchEvent(new Event('input'));
-        showToast('Схоже на ' + formatContainerNumber(found.number) + ' — перевірте, контрольна цифра не збіглася', 'error');
-        stopCameraStream();
-        closeModal();
-      } else {
-        statusEl.textContent = 'Не вдалося впевнено розпізнати номер. Спробуйте ще раз: ближче, чіткіше, без відблисків, рівно навпроти напису.';
-      }
-    } catch(err){
-      statusEl.textContent = 'Помилка розпізнавання: ' + err.message + '. Спробуйте ще раз або введіть вручну.';
-    } finally{ setLoading(false); }
+    let best = null;
+    let lastRawText = '';
+    for (const invert of [true, false]){
+      const variant = ctx.createImageData(original.width, original.height);
+      variant.data.set(original.data);
+      applyGrayscaleContrast(variant.data, invert);
+      ctx.putImageData(variant, 0, 0);
+      try{
+        const ocr = await cameraWorker.recognize(canvas);
+        lastRawText = (ocr.data.text || '').replace(/\s+/g, ' ').trim();
+        const found = extractContainerNumberFromText(ocr.data.text);
+        if (found && found.confident) { best = found; break; }
+        if (found && !best) best = found;
+      } catch(e){ /* пробуємо другий варіант полярності */ }
+    }
+    if (debugEl) debugEl.textContent = lastRawText ? ('Розпізнаний текст: ' + lastRawText) : '';
+    return best;
   }
 
   function updatePlateUi(){
