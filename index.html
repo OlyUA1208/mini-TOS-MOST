@@ -186,6 +186,12 @@
   .camera-wrap{ position:relative; background:#0B1116; border-radius:var(--radius); overflow:hidden; }
   #camera-video{ width:100%; display:block; max-height:56vh; }
   #camera-canvas{ display:none; }
+  .camera-guide{
+    position:absolute; left:6%; top:40%; width:88%; height:20%;
+    border:3px solid var(--amber); border-radius:6px;
+    box-shadow:0 0 0 2000px rgba(0,0,0,.5);
+    pointer-events:none;
+  }
 
   /* ---------- Forms ---------- */
   .form-card{ background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); padding:24px; box-shadow:var(--shadow-sm); }
@@ -1009,16 +1015,40 @@
     }
   }
 
-  // Шукає в розпізнаному (і часто зашумленому) тексті відрізок з 11 символів,
-  // що проходить повну перевірку ISO 6346 разом із контрольною цифрою — це
-  // сильний фільтр проти помилок розпізнавання: випадковий збіг математично малоймовірний.
+  // Рамка-підказка: частка від розміру відео, яку кадруємо перед розпізнаванням.
+  // Widescreen-пропорція навмисно — головний номер контейнера завжди набагато
+  // ширший, ніж високий, і зазвичай найбільший напис на дверях.
+  const CAMERA_GUIDE = { left:0.06, top:0.40, width:0.88, height:0.20 };
+
+  // Шукає в розпізнаному (і часто зашумленому) тексті відрізок з 11 символів.
+  // Спочатку — повна перевірка ISO 6346 разом із контрольною цифрою (майже
+  // неможливо збігтись випадково). Якщо такого немає — запам'ятовуємо перший
+  // відрізок правильної ФОРМИ (4 літери + 7 цифр) як варіант для перевірки,
+  // а не мовчки вставляємо щось непідтверджене.
   function extractContainerNumberFromText(rawText){
     const cleaned = (rawText || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    let shapeMatch = null;
     for (let i = 0; i + 11 <= cleaned.length; i++){
       const candidate = cleaned.slice(i, i + 11);
-      if (validateIso6346(candidate).state === 'valid') return candidate;
+      const v = validateIso6346(candidate);
+      if (v.state === 'valid') return { number:candidate, confident:true };
+      if (v.state === 'checkdigit' && !shapeMatch) shapeMatch = candidate;
     }
-    return null;
+    return shapeMatch ? { number:shapeMatch, confident:false } : null;
+  }
+
+  // Градації сірого + підвищення контрасту — без жорсткої бінаризації (щоб не
+  // губити символи при нерівному освітленні на реальному фото контейнера).
+  function preprocessCanvasForOcr(canvas){
+    const ctx = canvas.getContext('2d');
+    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const d = imgData.data;
+    for (let i = 0; i < d.length; i += 4){
+      const gray = 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2];
+      const contrasted = Math.min(255, Math.max(0, (gray - 128) * 1.6 + 128));
+      d[i] = d[i+1] = d[i+2] = contrasted;
+    }
+    ctx.putImageData(imgData, 0, 0);
   }
 
   document.getElementById('camera-btn').addEventListener('click', openCameraCapture);
@@ -1030,6 +1060,7 @@
       bodyHtml:
         '<div class="camera-wrap">' +
           '<video id="camera-video" autoplay playsinline muted></video>' +
+          '<div class="camera-guide"></div>' +
           '<canvas id="camera-canvas"></canvas>' +
         '</div>' +
         '<p id="camera-status" class="plate-hint" style="color:var(--muted);margin-top:10px;">Увімкнення камери…</p>',
@@ -1044,7 +1075,7 @@
       activeCameraStream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment' } });
       const video = card.querySelector('#camera-video');
       video.srcObject = activeCameraStream;
-      statusEl.textContent = 'Наведіть камеру на номер контейнера і натисніть «Зняти фото». Спроб — скільки завгодно.';
+      statusEl.textContent = 'Впишіть ГОЛОВНИЙ номер (найбільший напис на дверях) у рамку — не менший код під ним. Спроб — скільки завгодно.';
     } catch(err){
       statusEl.textContent = "Не вдалося увімкнути камеру (" + err.message + "). Номер завжди можна ввести вручну.";
     }
@@ -1058,9 +1089,20 @@
       if (statusEl) statusEl.textContent = 'Камера ще не готова — зачекайте секунду і спробуйте ще раз.';
       return;
     }
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    // Кадруємо лише область рамки-підказки й трохи збільшуємо — маленький,
+    // чіткий фрагмент з самим номером розпізнається значно надійніше, ніж
+    // весь контейнер одразу.
+    const sx = Math.round(video.videoWidth * CAMERA_GUIDE.left);
+    const sy = Math.round(video.videoHeight * CAMERA_GUIDE.top);
+    const sw = Math.round(video.videoWidth * CAMERA_GUIDE.width);
+    const sh = Math.round(video.videoHeight * CAMERA_GUIDE.height);
+    const scale = 2;
+    canvas.width = sw * scale;
+    canvas.height = sh * scale;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+    preprocessCanvasForOcr(canvas);
 
     statusEl.textContent = 'Завантажую розпізнавання…';
     setLoading(true);
@@ -1071,18 +1113,28 @@
       }
       statusEl.textContent = 'Розпізнаю номер…';
       const worker = await Tesseract.createWorker('eng');
+      await worker.setParameters({
+        tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
+        tessedit_pageseg_mode: '7' // один рядок тексту — саме те, що в кадрованій рамці
+      });
       const result = await worker.recognize(canvas);
       await worker.terminate();
 
       const found = extractContainerNumberFromText(result.data.text);
-      if (found){
-        arrivalNumberInput.value = found;
+      if (found && found.confident){
+        arrivalNumberInput.value = found.number;
         arrivalNumberInput.dispatchEvent(new Event('input'));
-        showToast('Номер розпізнано: ' + formatContainerNumber(found), 'success');
+        showToast('Номер розпізнано: ' + formatContainerNumber(found.number), 'success');
+        stopCameraStream();
+        closeModal();
+      } else if (found){
+        arrivalNumberInput.value = found.number;
+        arrivalNumberInput.dispatchEvent(new Event('input'));
+        showToast('Схоже на ' + formatContainerNumber(found.number) + ' — перевірте, контрольна цифра не збіглася', 'error');
         stopCameraStream();
         closeModal();
       } else {
-        statusEl.textContent = 'Не вдалося впевнено розпізнати номер. Спробуйте ще раз (ближче, чіткіше, менше відблисків) або введіть вручну.';
+        statusEl.textContent = 'Не вдалося впевнено розпізнати номер. Спробуйте ще раз: ближче, чіткіше, без відблисків, рівно навпроти напису.';
       }
     } catch(err){
       statusEl.textContent = 'Помилка розпізнавання: ' + err.message + '. Спробуйте ще раз або введіть вручну.';
