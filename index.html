@@ -175,6 +175,18 @@
   .plate-hint.is-error{ color:#F3A08E; }
   .plate-hint.is-ok{ color:#9FDBB6; }
 
+  .camera-btn{
+    flex-shrink:0; width:56px; display:flex; align-items:center; justify-content:center;
+    background:transparent; border:2px solid rgba(255,255,255,.16); border-radius:var(--radius);
+    color:rgba(255,255,255,.75); cursor:pointer; transition:border-color .15s ease,color .15s ease;
+  }
+  .camera-btn:hover{ border-color:var(--amber); color:var(--amber); }
+  .camera-btn svg{ width:24px; height:24px; }
+
+  .camera-wrap{ position:relative; background:#0B1116; border-radius:var(--radius); overflow:hidden; }
+  #camera-video{ width:100%; display:block; max-height:56vh; }
+  #camera-canvas{ display:none; }
+
   /* ---------- Forms ---------- */
   .form-card{ background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); padding:24px; box-shadow:var(--shadow-sm); }
   .form-grid{ display:grid; grid-template-columns:repeat(2,1fr); gap:16px 20px; margin-bottom:20px; align-items:end; }
@@ -333,6 +345,11 @@
   .bay-report-cell--found{ border-color:var(--amber); box-shadow:0 0 0 2px var(--amber); }
   .bay-report-cell--route{ background:var(--go) !important; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px; }
   .bay-report-cell--target{ box-shadow:inset 0 0 0 3px var(--amber); }
+  .bay-report-cell--clickable{ cursor:pointer; }
+  .bay-report-cell--clickable:hover{ transform:translateY(-1px); }
+  .bay-report-cell--moving{ box-shadow:0 0 0 3px var(--amber); animation:lock-pop .3s ease; }
+  .bay-report-cell--movetarget{ background:rgba(47,125,82,.18); border-color:var(--go); cursor:pointer; }
+  .bay-report-cell--movetarget:hover{ background:rgba(47,125,82,.3); }
   .bay-report-cell-num--under{ font-size:8px; opacity:.9; }
   .bay-report-cell-num{ font-family:var(--font-mono); font-size:clamp(11px,2.2vw,15px); font-weight:700; color:#fff; text-align:center; line-height:1.2; width:100%; }
   .bay-report-cell-step{ font-family:var(--font-mono); font-weight:700; font-size:16px; color:#fff; }
@@ -480,6 +497,12 @@
         <div class="plate-row">
           <input id="arrival-number" class="plate-input" type="text" inputmode="text" autocomplete="off" spellcheck="false" placeholder="MSCU1234567" maxlength="11" />
           <div id="lock-badge" class="lock-badge"><span id="lock-badge-content">–</span></div>
+          <button type="button" id="camera-btn" class="camera-btn" title="Сфотографувати номер" aria-label="Сфотографувати номер контейнера">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+              <circle cx="12" cy="14" r="3.5" stroke="currentColor" stroke-width="1.8"/>
+            </svg>
+          </button>
         </div>
         <p id="plate-hint" class="plate-hint">Введіть 4 літери коду власника + 7 цифр серійного номера</p>
       </div>
@@ -617,6 +640,7 @@
             <button id="bay-route-btn" class="btn btn-ghost hidden" type="button">Маршрут зняття</button>
           </div>
           <p id="bay-route-note" class="stock-summary hidden"></p>
+          <p id="bay-move-note" class="stock-summary hidden"></p>
           <div class="bay-detail-body">
             <div class="bay-zoom-slider-wrap">
               <input type="range" id="bay-zoom-slider" class="bay-zoom-slider" min="30" max="150" step="5" value="100" />
@@ -961,6 +985,110 @@
     }
   }
 
+  // ---------- Камера: фото номера контейнера + розпізнавання (Tesseract.js, завантажується лише за потреби) ----------
+  let tesseractLoadPromise = null;
+  let activeCameraStream = null;
+
+  function ensureTesseractLoaded(){
+    if (window.Tesseract) return Promise.resolve();
+    if (tesseractLoadPromise) return tesseractLoadPromise;
+    tesseractLoadPromise = new Promise(function(resolve, reject){
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+      script.onload = function(){ resolve(); };
+      script.onerror = function(){ tesseractLoadPromise = null; reject(new Error("Не вдалось завантажити бібліотеку розпізнавання")); };
+      document.head.appendChild(script);
+    });
+    return tesseractLoadPromise;
+  }
+
+  function stopCameraStream(){
+    if (activeCameraStream){
+      activeCameraStream.getTracks().forEach(function(t){ t.stop(); });
+      activeCameraStream = null;
+    }
+  }
+
+  // Шукає в розпізнаному (і часто зашумленому) тексті відрізок з 11 символів,
+  // що проходить повну перевірку ISO 6346 разом із контрольною цифрою — це
+  // сильний фільтр проти помилок розпізнавання: випадковий збіг математично малоймовірний.
+  function extractContainerNumberFromText(rawText){
+    const cleaned = (rawText || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    for (let i = 0; i + 11 <= cleaned.length; i++){
+      const candidate = cleaned.slice(i, i + 11);
+      if (validateIso6346(candidate).state === 'valid') return candidate;
+    }
+    return null;
+  }
+
+  document.getElementById('camera-btn').addEventListener('click', openCameraCapture);
+
+  async function openCameraCapture(){
+    const card = showModal({
+      title: 'Сфотографувати номер контейнера',
+      wide: true,
+      bodyHtml:
+        '<div class="camera-wrap">' +
+          '<video id="camera-video" autoplay playsinline muted></video>' +
+          '<canvas id="camera-canvas"></canvas>' +
+        '</div>' +
+        '<p id="camera-status" class="plate-hint" style="color:var(--muted);margin-top:10px;">Увімкнення камери…</p>',
+      buttons: [
+        { label:'Скасувати', className:'btn btn-ghost', onClick:function(){ stopCameraStream(); closeModal(); } },
+        { label:'Зняти фото', className:'btn btn-primary', onClick:function(){ captureAndRecognize(); } }
+      ]
+    });
+
+    const statusEl = card.querySelector('#camera-status');
+    try{
+      activeCameraStream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment' } });
+      const video = card.querySelector('#camera-video');
+      video.srcObject = activeCameraStream;
+      statusEl.textContent = 'Наведіть камеру на номер контейнера і натисніть «Зняти фото». Спроб — скільки завгодно.';
+    } catch(err){
+      statusEl.textContent = "Не вдалося увімкнути камеру (" + err.message + "). Номер завжди можна ввести вручну.";
+    }
+  }
+
+  async function captureAndRecognize(){
+    const video = document.getElementById('camera-video');
+    const statusEl = document.getElementById('camera-status');
+    const canvas = document.getElementById('camera-canvas');
+    if (!video || !video.videoWidth){
+      if (statusEl) statusEl.textContent = 'Камера ще не готова — зачекайте секунду і спробуйте ще раз.';
+      return;
+    }
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    statusEl.textContent = 'Завантажую розпізнавання…';
+    setLoading(true);
+    try{
+      await ensureTesseractLoaded();
+      if (!window.Tesseract || typeof Tesseract.createWorker !== 'function'){
+        throw new Error('Бібліотеку розпізнавання не вдалось ініціалізувати');
+      }
+      statusEl.textContent = 'Розпізнаю номер…';
+      const worker = await Tesseract.createWorker('eng');
+      const result = await worker.recognize(canvas);
+      await worker.terminate();
+
+      const found = extractContainerNumberFromText(result.data.text);
+      if (found){
+        arrivalNumberInput.value = found;
+        arrivalNumberInput.dispatchEvent(new Event('input'));
+        showToast('Номер розпізнано: ' + formatContainerNumber(found), 'success');
+        stopCameraStream();
+        closeModal();
+      } else {
+        statusEl.textContent = 'Не вдалося впевнено розпізнати номер. Спробуйте ще раз (ближче, чіткіше, менше відблисків) або введіть вручну.';
+      }
+    } catch(err){
+      statusEl.textContent = 'Помилка розпізнавання: ' + err.message + '. Спробуйте ще раз або введіть вручну.';
+    } finally{ setLoading(false); }
+  }
+
   function updatePlateUi(){
     const v = arrivalValidation;
     lockBadge.className = 'lock-badge';
@@ -1001,6 +1129,7 @@
   });
 
   function resetArrivalForm(){
+    stopCameraStream();
     document.getElementById('arrival-form').reset();
     arrivalNumberInput.value = '';
     arrivalValidation = validateIso6346('');
@@ -1478,6 +1607,8 @@
       bayDetailCells = data.cells;
       bayDetailHighlight = highlight;
       bayDetailRoute = null;
+      moveModeContainer = null;
+      document.getElementById('bay-move-note').classList.add('hidden');
       document.getElementById('bay-detail-title').textContent = 'Бухта ' + BAY_CONFIGS[key].label;
       document.getElementById('bay-overview').classList.add('hidden');
       document.getElementById('bay-detail').classList.remove('hidden');
@@ -1511,6 +1642,58 @@
     spacer.style.height = (content.scrollHeight * bayZoomScale) + 'px';
   }
 
+  let moveModeContainer = null;  // {number, width, tier, lengths, span} — контейнер, обраний для переміщення
+
+  function isValidMoveDestination(cells, moving, l, w, t){
+    const cfg = BAY_CONFIGS[bayDetailKey];
+    if (l < 1 || (l + moving.span - 1) > cfg.length || w < 1 || w > cfg.width || t < 1 || t > cfg.height) return false;
+    for (let i = 0; i < moving.span; i++){
+      const thisL = l + i;
+      const occ = cells.filter(function(c){ return c.number !== moving.number && c.tier===t && c.length===thisL && c.width===w; })[0];
+      if (occ) return false;
+      if (t > 1){
+        const supported = cells.filter(function(c){ return c.tier===t-1 && c.length===thisL && c.width===w; })[0];
+        if (!supported) return false;
+      }
+    }
+    return true;
+  }
+
+  function startMoveMode(occ){
+    const myCells = bayDetailCells.filter(function(c){ return c.number === occ.number; });
+    moveModeContainer = {
+      number: occ.number, width: occ.width, tier: occ.tier,
+      lengths: myCells.map(function(c){ return c.length; }), span: myCells.length
+    };
+    bayDetailRoute = null;
+    document.getElementById('bay-route-note').classList.add('hidden');
+    document.getElementById('bay-lifts-panel').classList.add('hidden');
+    const note = document.getElementById('bay-move-note');
+    note.textContent = 'Переміщення ' + formatContainerNumber(occ.number) + ': клікніть підсвічену вільну чарунку, або клікніть контейнер ще раз, щоб скасувати.';
+    note.classList.remove('hidden');
+    renderBayDetailGrid();
+  }
+
+  function cancelMoveMode(){
+    moveModeContainer = null;
+    document.getElementById('bay-move-note').classList.add('hidden');
+    renderBayDetailGrid();
+  }
+
+  async function confirmMoveTo(l, w, t){
+    const moving = moveModeContainer;
+    if (!moving) return;
+    setLoading(true);
+    try{
+      await apiCall('moveContainer', { bay:bayDetailKey, number:moving.number, length:l, width:w, tier:t });
+      showToast('Контейнер ' + formatContainerNumber(moving.number) + ' переміщено', 'success');
+      moveModeContainer = null;
+      document.getElementById('bay-move-note').classList.add('hidden');
+      await openBayDetail(bayDetailKey, null);
+    } catch(err){ showToast(err.message, 'error'); }
+    finally{ setLoading(false); }
+  }
+
   function renderBayDetailGrid(){
     const cfg = BAY_CONFIGS[bayDetailKey];
     const root = document.getElementById('bay-detail-grid');
@@ -1523,8 +1706,10 @@
           const occ = bayDetailCells.filter(function(c){ return c.tier===t && c.length===l && c.width===w; })[0];
           let cls = 'bay-report-cell';
           let inner = '';
+          let clickable = false;
           if (occ){
-            cls += ' bay-report-cell--filled';
+            cls += ' bay-report-cell--filled bay-report-cell--clickable';
+            clickable = true;
             inner = '<span class="bay-report-cell-num">' + formatContainerNumberCompact(occ.number) + '</span>';
             const routeIdx = bayDetailRoute ? bayDetailRoute.indexOf(occ.number) : -1;
             if (routeIdx !== -1){
@@ -1532,11 +1717,17 @@
               inner = '<span class="bay-report-cell-step">' + (routeIdx + 1) + '</span>' +
                 '<span class="bay-report-cell-num bay-report-cell-num--under">' + formatContainerNumberCompact(occ.number) + '</span>';
             }
+            if (moveModeContainer && moveModeContainer.number === occ.number){
+              cls += ' bay-report-cell--moving';
+            }
+          } else if (moveModeContainer && isValidMoveDestination(bayDetailCells, moveModeContainer, l, w, t)){
+            cls += ' bay-report-cell--movetarget';
+            clickable = true;
           }
           if (bayDetailHighlight && bayDetailHighlight.tier===t && bayDetailHighlight.length===l && bayDetailHighlight.width===w){
             cls += ' bay-report-cell--found';
           }
-          html += '<div class="' + cls + '">' + inner + '</div>';
+          html += '<div class="' + cls + '" data-l="' + l + '" data-w="' + w + '" data-t="' + t + '" data-clickable="' + (clickable?'1':'0') + '">' + inner + '</div>';
         }
       }
       html += '</div></div>';
@@ -1544,6 +1735,19 @@
     html += '</div>';
     root.innerHTML = html;
     applyBayZoom();
+
+    root.querySelectorAll('[data-clickable="1"]').forEach(function(cellEl){
+      cellEl.addEventListener('click', function(){
+        const l = parseInt(cellEl.dataset.l,10), w = parseInt(cellEl.dataset.w,10), t = parseInt(cellEl.dataset.t,10);
+        const occ = bayDetailCells.filter(function(c){ return c.tier===t && c.length===l && c.width===w; })[0];
+        if (occ){
+          if (moveModeContainer && moveModeContainer.number === occ.number) cancelMoveMode();
+          else startMoveMode(occ);
+        } else if (moveModeContainer){
+          confirmMoveTo(l, w, t);
+        }
+      });
+    });
   }
 
   document.getElementById('bay-search').addEventListener('keydown', function(e){
